@@ -30,6 +30,8 @@ export interface Attachment {
   name: string;
   dataUrl?: string;
   text?: string;
+  path?: string; // a file another Bot handed over: relative to the receiver's workspace
+  botId?: string; // the receiver whose workspace holds it (opens from the chip)
 }
 
 export interface QuestionCard {

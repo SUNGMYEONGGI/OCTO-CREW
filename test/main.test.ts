@@ -102,6 +102,8 @@ assert.match(p1.text, /^명기: hi[\s\S]*note[\s\S]*\[RO\]: from b2$/);
 assert.deepEqual(p1.images, [{ mediaType: 'image/png', data: 'AAA=' }]);
 assert.equal(pendingPrompt(conv, 'b1', { bots, userName: '명기' }, 3).text, '');
 assert.equal(pendingPrompt({ kind: 'dm', messages: [msg({ role: 'user', content: 'yo' })] }, 'b1', { bots, userName: '명기' }).text, 'yo');
+// A file another Bot handed over is pointed to by its path in the receiver's workspace.
+assert.match(pendingPrompt({ kind: 'dm', messages: [msg({ role: 'user', content: '봐줘', fromBotId: 'b2', attachments: [{ name: 'a.pdf', path: 'received/a.pdf', botId: 'b1' }] })] }, 'b1', { bots, userName: '명기' }).text, /첨부 파일 a\.pdf: 작업 폴더의 received\/a\.pdf$/);
 assert.deepEqual(mentionedBots('@RO 그리고 @RO Agent 확인', bots), ['b2', 'b1']);
 assert.deepEqual(mentionedBots('@ro agent만', bots), ['b1']);
 

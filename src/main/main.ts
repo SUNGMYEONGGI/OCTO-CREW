@@ -510,8 +510,8 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
 
   const toolCtx: ToolCtx = {
     bot, state,
-    messageBot: (name, message) => messageBot(bot, name, message, initiator, conv),
-    messageBots: (names, message) => messageBots(bot, names, message, initiator, conv),
+    messageBot: (name, message, files) => messageBot(bot, name, message, initiator, conv, files),
+    messageBots: (names, message, files) => messageBots(bot, names, message, initiator, conv, files),
     createRoutine: (args) => createRoutine(conv, bot, args),
     webhookUrl: triggers.webhookUrl,
     cancelRoutine: (id) => { const r = state.routines.find((x) => x.id === id && x.convId === conv.id); if (r) r.enabled = false; },
@@ -535,7 +535,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
       broadcast();
       return `"${team.name}" 팀원: ${team.botIds.map((id) => findBot(id)?.name).filter(Boolean).join(', ')}`;
     },
-    messageTeam: (name, message, mention) => messageTeam(bot, teamNamed(name), message, mention || [], initiator, conv),
+    messageTeam: (name, message, mention, files) => messageTeam(bot, teamNamed(name), message, mention || [], initiator, conv, files),
     setStatus: (subject, verb) => {
       const a = runtime.active[conv.id];
       if (a?.botId === bot.id) { a.status = { subject: subject.slice(0, 40), verb: verb.slice(0, 20) }; broadcast(); }
@@ -863,7 +863,31 @@ function threadBots(conv: Conv, rootId: string): string[] {
 // A bot DMs another bot (mcp__characterbot__message_bot): the message lands in the
 // target's chat, the target answers there, and the answer goes back as the tool
 // result. One hop only, so two bots can't keep each other busy.
-async function messageBot(from: Bot, name: string, text: string, initiator: Initiator, fromConv: Conv): Promise<string> {
+// Files a bot hands over (attachments of message_bot / message_bots / message_team):
+// checked to be inside the sender's workspace, then copied into each receiver's
+// received/ folder under the same name.
+const MAX_HANDOFF = 20 * 1024 * 1024;
+function handFiles(from: Bot, paths: string[] = [], to: string[]): Attachment[] {
+  if (!paths.length) return [];
+  if (!to.length) throw new Error('파일을 받을 Bot이 없어요');
+  return paths.map((p) => {
+    const src = tools.inside(workspace(from.id), p);
+    const st = fs.statSync(src, { throwIfNoEntry: false });
+    if (!st?.isFile()) throw new Error(`"${p}" 파일이 작업 폴더에 없어요`);
+    if (st.size > MAX_HANDOFF) throw new Error(`"${p}" 파일이 20MB보다 커요`);
+    const { name: stem, ext } = path.parse(src);
+    let rel = path.join('received', `${stem}${ext}`);
+    for (let n = 2; to.some((id) => fs.existsSync(path.join(workspace(id), rel))); n++) rel = path.join('received', `${stem} (${n})${ext}`);
+    for (const id of to) {
+      const dest = tools.inside(workspace(id), rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+    }
+    return { name: path.basename(rel), path: rel, botId: to[0] };
+  });
+}
+
+async function messageBot(from: Bot, name: string, text: string, initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
   if (initiator === 'bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 또 다른 Bot에게 보낼 수 없어요');
   const others = state.bots.filter((b) => b.id !== from.id);
   const target = others.find((b) => b.name.toLowerCase() === name.trim().replace(/^@/, '').toLowerCase());
@@ -875,11 +899,12 @@ async function messageBot(from: Bot, name: string, text: string, initiator: Init
     if (Date.now() > until) throw new Error(`${target.name}이(가) 계속 다른 일을 하고 있어요. 나중에 다시 보내세요`);
     await new Promise((r) => setTimeout(r, 1000));
   }
+  const attachments = handFiles(from, files, [target.id]);
   const start = dm.messages.length;
   // Shown as "A, B 및 C 작업 중…" in the conversation that handed the work out.
   const active = runtime.active[fromConv.id];
   if (active) active.delegates = [...(active.delegates || []), target.id];
-  dm.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, viaBotId: from.id });
+  dm.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, viaBotId: from.id, attachments });
   touch(dm);
   try {
     await respond(dm, [target.id], 'bot', { viaBotId: from.id });
@@ -892,14 +917,14 @@ async function messageBot(from: Bot, name: string, text: string, initiator: Init
 }
 
 // The same task to several bots at once (message_bots), each in its own DM.
-async function messageBots(from: Bot, names: string[], text: string, initiator: Initiator, fromConv: Conv): Promise<string> {
+async function messageBots(from: Bot, names: string[], text: string, initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
   const targets = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
   if (targets.length < 2) throw new Error('Bot을 2개 이상 고르세요. 하나면 message_bot을 쓰세요');
   const replies: string[] = new Array(targets.length);
   let next = 0;
   const worker = async () => {
     for (let i = next++; i < targets.length; i = next++) {
-      replies[i] = await messageBot(from, targets[i], text, initiator, fromConv).catch((err: Error) => `오류: ${err.message}`);
+      replies[i] = await messageBot(from, targets[i], text, initiator, fromConv, files).catch((err: Error) => `오류: ${err.message}`);
     }
   };
   await Promise.all(Array.from({ length: Math.min(TOGETHER, targets.length) }, worker));
@@ -965,7 +990,7 @@ function greet(from: Bot | null, bot: Bot, note?: string): void {
 
 // A bot posts to a team chat (message_team); the mentioned members, or all of
 // them, answer there and their replies come back as the tool result.
-async function messageTeam(from: Bot, team: Conv, text: string, mention: string[], initiator: Initiator, fromConv: Conv): Promise<string> {
+async function messageTeam(from: Bot, team: Conv, text: string, mention: string[], initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
   if (initiator === 'bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 팀에 보낼 수 없어요');
   const members = team.botIds.filter((id) => id !== from.id);
   const targets = mention.length ? botsNamed(mention).map((b) => b.id).filter((id) => members.includes(id)) : members;
@@ -974,10 +999,11 @@ async function messageTeam(from: Bot, team: Conv, text: string, mention: string[
     if (Date.now() > until) throw new Error(`"${team.name}" 팀이 계속 다른 일을 하고 있어요`);
     await new Promise((r) => setTimeout(r, 1000));
   }
+  const attachments = handFiles(from, files, members); // every member reads the team chat
   const start = team.messages.length;
   const active = runtime.active[fromConv.id];
   if (active) active.delegates = [...(active.delegates || []), ...targets];
-  team.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id });
+  team.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, attachments });
   touch(team);
   try {
     await respond(team, targets, 'bot', {}, true);
