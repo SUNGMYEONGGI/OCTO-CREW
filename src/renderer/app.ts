@@ -20,6 +20,7 @@ const ui: {
   panelOpen: boolean;
   history: { list: string[]; index: number };
   threadId: string | null;
+  exchange?: { runs: [string, string][]; one: boolean } | null; // bot-to-bot runs open in the panel: [convId, first message id]
   bundles: Set<string>;
   keepUnread?: string | null;
   suggest?: { list: Suggestion[]; index: number; el: HTMLTextAreaElement } | null;
@@ -304,7 +305,7 @@ function toolItem(c: Conv, m: Message): HTMLElement | null {
 }
 
 // "메시지 보냄 (avatars) Bot 4개", "Bot 만듦 (avatar) Reviewer", "팀 만듦 HCI 리뷰어"
-// for what a bot did with create_bot / create_team / message_team.
+// for what a bot did with create_bot / create_team / message_bot(s) / message_team.
 function teamLine(m: Message): HTMLElement | null {
   const short = (m.name || '').replace(/^mcp__characterbot__/, '');
   if (!m.content || m.content.startsWith('Error')) return null;
@@ -318,6 +319,14 @@ function teamLine(m: Message): HTMLElement | null {
   if (short === 'create_team' || short === 'add_to_team') {
     const bots = ((a.bots as string[]) || []).map(named).filter((b): b is Bot => Boolean(b));
     return h('div', { class: 'team-line' }, short === 'create_team' ? '팀 만듦' : '팀원 추가', h('b', null, String(a.name || a.team)), stack(bots));
+  }
+  if (short === 'message_bot' || short === 'message_bots') {
+    const names = short === 'message_bot' ? [String(a.bot_name)] : ((a.bot_names as string[]) || []);
+    const bots = names.map(named).filter((b): b is Bot => Boolean(b));
+    const open = () => openExchange(exchangesOf(m, names), true);
+    return bots.length === 1
+      ? h('button', { class: 'team-line', title: '주고받은 메시지 열기', onclick: open }, '메시지 보냄', avatar(bots[0], 20), h('b', null, bots[0].name))
+      : h('button', { class: 'team-line', title: '주고받은 메시지 열기', onclick: open }, '메시지 보냄', stack(bots), `Bot ${bots.length}개`);
   }
   if (short === 'message_team') {
     const team = S.convs.find((c) => c.kind === 'group' && c.name.toLowerCase() === String(a.team).toLowerCase());
@@ -395,11 +404,66 @@ function bundleItem(c: Conv, run: Message[]): HTMLElement {
   const from = botById(run[0].viaBotId);
   const n = run.filter((m) => (m.role === 'user' || m.role === 'assistant') && (m.content || m.error)).length;
   const key = run[0].id;
-  const open = ui.bundles.has(key);
+  const open = ui.exchange?.runs.some(([, id]) => id === key);
   return h('div', { class: `bundle${open ? ' open' : ''}` },
-    h('button', { class: 'bundle-head', onclick: () => { if (open) ui.bundles.delete(key); else ui.bundles.add(key); renderThread(); } },
-      `메시지 ${n}개 · `, avatar(from, 18), h('b', {}, from?.name || 'Bot')),
-    open ? h('div', { class: 'bundle-body' }, messageItems(c, run.map(({ viaBotId, ...m }) => m))) : null);
+    h('button', { class: 'bundle-head', title: '대화 열기', onclick: () => (open ? closeExchange() : openExchange([[c.id, key]])) },
+      `메시지 ${n}개 · `, avatar(from, 18), h('b', {}, from?.name || 'Bot')));
+}
+
+// The messages of a bot-to-bot run, from its first message on: the whole
+// folded bundle, or (one) just that request and its answer.
+function exchangeRun(c: Conv, firstId: string, one = false): Message[] {
+  const i = c.messages.findIndex((m) => m.id === firstId);
+  if (i < 0) return [];
+  const via = c.messages[i].viaBotId;
+  let j = i;
+  while (j + 1 < c.messages.length && c.messages[j + 1].viaBotId === via && !(one && c.messages[j + 1].role === 'user')) j++;
+  return c.messages.slice(i, j + 1);
+}
+
+// Where a message_bot(s) call landed: the run in each target's DM that starts
+// with the same text from this bot.
+function exchangesOf(m: Message, names: string[]): [string, string][] {
+  return names.flatMap((n): [string, string][] => {
+    const bot = S.bots.find((b) => b.name.toLowerCase() === n.replace(/^@/, '').toLowerCase());
+    const dm = bot && S.convs.find((x) => x.kind === 'dm' && x.botIds[0] === bot.id);
+    const first = dm?.messages.find((x) => x.viaBotId === m.botId && x.role === 'user' && x.ts >= m.ts - 5000 && x.content === (m.args as { message?: string })?.message);
+    return dm && first ? [[dm.id, first.id]] : [];
+  });
+}
+
+function openExchange(runs: [string, string][], one = false): void {
+  if (!runs.length) return void toast('주고받은 메시지를 찾지 못했어요');
+  ui.exchange = { runs, one };
+  ui.threadId = null;
+  ui.threadEls = null;
+  ui.panelOpen = true;
+  render(true);
+}
+
+function closeExchange() {
+  ui.exchange = null;
+  render(true);
+}
+
+// Bot-to-bot messages in the right panel: one section per receiving bot.
+function exchangeView(): HTMLElement | null {
+  const { runs: ids = [], one = false } = ui.exchange || {};
+  const runs = ids.flatMap(([convId, id]) => {
+    const c = S.convs.find((x) => x.id === convId);
+    const run = c ? exchangeRun(c, id, one) : [];
+    return c && run.length ? [{ c, run }] : [];
+  });
+  if (!runs.length) { ui.exchange = null; return null; }
+  const from = botById(runs[0].run[0].viaBotId);
+  return h('div', { class: 'thread-view' },
+    h('div', { class: 'panel-top' },
+      h('span', { class: 'grow thread-title' }, avatar(from, 20), ` ${from?.name || 'Bot'}이(가) 보낸 메시지`),
+      h('button', { class: 'circle-btn bordered', title: '닫기', onclick: closeExchange }, icon('close', 18))),
+    h('div', { class: 'thread-list' }, runs.map(({ c, run }) => [
+      runs.length > 1 ? h('div', { class: 'thread-sep' }, h('span', {}, convTitle(c))) : null,
+      messageItems(c, run.map(({ viaBotId, ...m }) => m), { inThread: true }),
+    ])));
 }
 
 // "보낸 사람 [avatar] name" under a greeting; opens the maker's note.
@@ -533,6 +597,7 @@ function renderThread() {
 
 function openThread(id: string): void {
   ui.threadId = id;
+  ui.exchange = null;
   ui.panelOpen = true;
   render(true);
   ui.threadEls?.ta.focus();
@@ -1050,7 +1115,7 @@ async function renderPanel(force = false) {
   document.body.classList.toggle('panel-closed', !ui.panelOpen);
   if (!ui.panelOpen) return;
   const c = currentConv();
-  const thread = ui.threadId && threadView(c);
+  const thread = (ui.exchange && exchangeView()) || (ui.threadId && threadView(c));
   if (thread) {
     if (el.firstChild !== thread) fill(el, thread);
     return;
@@ -1331,7 +1396,7 @@ function select(id: string | null | undefined, remember = true): void {
     ui.history.list = [...ui.history.list.slice(0, ui.history.index + 1), id];
     ui.history.index = ui.history.list.length - 1;
   }
-  if (id !== ui.convId) { ui.threadId = null; ui.threadEls = null; ui.keepUnread = null; }
+  if (id !== ui.convId) { ui.threadId = null; ui.threadEls = null; ui.keepUnread = null; ui.exchange = null; }
   ui.convId = id;
   ui.attachments = [];
   ui.skillId = null;
@@ -1484,7 +1549,8 @@ function jumpTo(convId: string, m: Message) {
     const list = (S.convs.find((x) => x.id === convId)?.messages || []).filter((x) => x.threadOf === m.threadOf);
     let i = list.findIndex((x) => x.id === m.id);
     while (i > 0 && list[i - 1].viaBotId === m.viaBotId) i--;
-    if (i >= 0) ui.bundles.add(list[i].id);
+    select(convId);
+    if (i >= 0 && !m.threadOf) openExchange([[convId, list[i].id]]);
   }
   select(convId);
   if (m.threadOf) openThread(m.threadOf);
