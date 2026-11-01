@@ -271,6 +271,12 @@ textarea.field { min-height: 120px; resize: vertical; line-height: 1.5; }
 .pick-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; width: 100%; text-align: left; }
 .pick-row:hover { background: var(--soft); }
 .pick-row.sel { background: var(--hover); }
+.dialog.wide { width: min(780px, 92vw); }
+.gallery { display: grid; grid-template-columns: 260px 1fr; gap: 16px; min-height: 380px; }
+.gallery-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; max-height: 52vh; }
+.gallery-detail { display: flex; flex-direction: column; gap: 8px; padding: 4px 4px 4px 16px; border-left: 1px solid var(--stroke); overflow-y: auto; max-height: 52vh; }
+.gallery-detail h3 { margin: 0; }
+.gallery-cats { align-self: flex-start; flex-wrap: wrap; }
 
 .settings { width: min(966px, 92vw); height: min(754px, 88vh); display: flex; overflow: hidden; }
 .settings nav { width: 214px; padding: 18px 14px; background: var(--sidebar); border-radius: 20px 0 0 20px; display: flex; flex-direction: column; gap: 2px; flex: none; border-right: 1px solid var(--stroke); }

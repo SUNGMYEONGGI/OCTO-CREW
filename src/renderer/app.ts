@@ -1,4 +1,5 @@
 import type { FileEntry } from '../main/tools';
+import { ASSISTANT_RULES, CATEGORIES, TEMPLATES, type BotTemplate } from './templates';
 import type { ActiveRun, Approval, AuditEntry, Bot, Broadcast, Conv, MeetingCard, Message, QuestionCard, Routine, Section, Skill, SkillCard, StreamChunk } from '../shared/types';
 import { openSettings, renderSettings, planUsage, refreshUsage, confirmLogout, SETTINGS_TABS } from './settings';
 import { openApps, renderApps, serverTile } from './apps';
@@ -68,7 +69,7 @@ function renderSidebar() {
   const plus: HTMLElement = h('button', { class: 'circle-btn', title: '새로 만들기', onclick: () => popover(plus, [
     { icon: 'message', label: '새 메시지', onclick: openNewMessage },
     { icon: 'plus', label: '새 Bot 만들기', onclick: openNewBot },
-    { icon: 'sparkle', label: 'AI 비서 템플릿', chevron: true, onclick: () => popover(plus, ASSISTANTS.map((t) => ({ label: t.name, hint: t.description, onclick: () => createFromTemplate(t) }))) },
+    { icon: 'sparkle', label: '템플릿 갤러리', onclick: openGallery },
     { icon: 'download', label: '가져오기', chevron: true, onclick: () => popover(plus, [
       { icon: 'download', label: 'Bot 템플릿 가져오기', onclick: async () => select(await act('importBot')) },
       { icon: 'file', label: 'CSV에서 Bot 가져오기', onclick: importBotsCsv },
@@ -1267,25 +1268,46 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
   return { body, look: () => (mode === 'ai' && state.image ? { image: state.image } : { shape: state.shape, color: state.color, image: null, pixels: state.pixels || null }) };
 }
 
-// Assistant templates for the + menu.
-const ASSISTANT_RULES = '당신은 먼저 챙기는(proactive) 비서입니다. 사용자가 요청하지 않은 회의 초대를 발견하면 request_meeting_approval 카드로 참석 여부를 물으세요. 정기 점검 때 사용자가 알아야 할 일을 찾으면 묻기 전에 먼저 알리고, 다음 행동을 제안하세요. 연결된 앱(캘린더, 메일, Slack, Notion 등)을 직접 조회해 사실에 근거해 답하세요. 메일 발송·메시지 전송·삭제처럼 남에게 보이거나 되돌리기 어려운 일은 초안을 먼저 보여주고 승인을 받으세요. 매일 반복할 일은 schedule_routine으로 루틴을 제안하고, 사용자의 선호와 사람·프로젝트 정보는 remember로 기억하세요. 답은 짧고 훑어보기 쉽게 쓰세요.';
-const ASSISTANTS = [
-  { name: '비서실장', description: '메일·Slack·일정에서 내가 결정할 일을 골라 순서대로 알려줘요', prompt: '당신은 사용자의 비서실장입니다. Slack, 이메일, 캘린더를 살펴 사용자가 확인하거나 결정해야 할 일을 우선순위대로 정리하고, 놓친 요청과 마감을 짚어 줍니다.',
-    routines: [{ daily_time: '09:00', prompt: '오늘 확인하거나 결정해야 할 일을 Slack·메일·캘린더에서 찾아 우선순위대로 알려줘.' }, { every_minutes: 60, prompt: '지난 1시간 동안 나에게 온 요청·멘션·급한 메일이 있으면 알려줘.' }] },
-  { name: '아침 브리핑', description: '매일 아침 오늘 일정과 챙길 일을 한 화면으로 정리해요', prompt: '당신은 일일 브리핑 작성자입니다. 오늘 일정, 중요한 메일과 메시지, 마감이 다가오는 일을 추려 아침마다 한 화면짜리 브리핑으로 정리합니다.',
-    routines: [{ daily_time: '08:00', prompt: '오늘의 일일 브리핑을 작성해줘.' }] },
-  { name: '임원 비서', description: '회의 준비와 일정 조율을 맡고, 늦게 들어온 대화는 요약해 줘요', prompt: '당신은 사용자의 임원 비서입니다. 아침 브리핑, 회의 준비 자료, 일정 조율, 후속 조치 정리를 맡고, 대화에 늦게 합류하면 놓친 내용을 요약해 줍니다.',
-    routines: [{ daily_time: '08:30', prompt: '아침 브리핑을 해줘.' }, { every_minutes: 30, prompt: '1시간 안에 시작하는 회의가 있으면 준비 자료(참석자, 관련 메일·문서, 안건)를 정리해 알려줘.' }, { every_minutes: 60, prompt: '내가 아직 응답하지 않은 새 회의 초대가 있으면 request_meeting_approval로 참석 여부를 물어봐줘.' }] },
-  { name: '메일 정리', description: '새 메일을 분류하고 답장이 필요한 메일엔 초안을 붙여 줘요', prompt: '당신은 받은 편지함 관리자입니다. 새 메일을 긴급/답장 필요/참고/무시로 분류하고, 긴급 스레드를 먼저 알려 주며, 답장이 필요한 메일에는 승인용 초안을 작성합니다.',
-    routines: [{ every_minutes: 30, prompt: '새 메일을 분류하고, 긴급하거나 답장이 필요한 메일이 있으면 초안과 함께 알려줘.' }] },
-];
+const createAssistant = (t: BotTemplate) =>
+  act('createAssistant', t.name, { shape: Math.floor(Math.random() * SHAPE_COUNT), color: COLORS[Math.floor(Math.random() * COLORS.length)], label: t.description,
+    systemPrompt: `${t.prompt}\n\n${t.category === '비서' ? ASSISTANT_RULES : '사용자의 언어로 답하세요.'}` }, t.routines);
 
-const createAssistant = (t: (typeof ASSISTANTS)[number]) =>
-  act('createAssistant', t.name, { shape: Math.floor(Math.random() * SHAPE_COUNT), color: COLORS[Math.floor(Math.random() * COLORS.length)], label: t.description, systemPrompt: `${t.prompt}\n\n${ASSISTANT_RULES}` }, t.routines);
-
-async function createFromTemplate(t: (typeof ASSISTANTS)[number]) {
+async function createFromTemplate(t: BotTemplate) {
   const id = await createAssistant(t);
-  if (id) { ui.tab = 'details'; select(id); }
+  if (id) { closeModal(); ui.tab = 'details'; select(id); }
+}
+
+// The template gallery: categories, search, and a preview of each template's
+// instructions, routines and the apps it works with.
+function openGallery() {
+  let category = '전체';
+  let picked: BotTemplate | null = null;
+  const search: HTMLInputElement = h('input', { class: 'field', placeholder: '템플릿 검색', oninput: () => draw() });
+  const chips = h('div', { class: 'seg gallery-cats' });
+  const list = h('div', { class: 'gallery-list' });
+  const detail = h('div', { class: 'gallery-detail' });
+  const connected = (app: string) => S.mcpServers.some((s) => s.name.toLowerCase().includes(app.toLowerCase()) || app.toLowerCase().includes(s.name.toLowerCase()));
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    const shown = TEMPLATES.filter((t) => (category === '전체' || t.category === category) && (!q || `${t.name} ${t.description} ${t.prompt}`.toLowerCase().includes(q)));
+    if (!picked || !shown.includes(picked)) picked = shown[0] || null;
+    fill(chips, ...['전체', ...CATEGORIES].map((c) => h('button', { class: c === category ? 'on' : '', onclick: () => { category = c; draw(); } }, c)));
+    fill(list, shown.length ? shown.map((t) => h('button', { class: `pick-row${t === picked ? ' sel' : ''}`, onclick: () => { picked = t; draw(); } },
+      h('span', { class: 'grow' }, h('b', {}, t.name), h('div', { class: 'muted small' }, t.description)))) : h('div', { class: 'muted small' }, '찾는 템플릿이 없어요'));
+    const t = picked;
+    fill(detail, t ? [
+      h('div', { style: 'font-weight:600;font-size:17px' }, t.name), h('div', { class: 'muted small' }, `${t.category} · ${t.description}`),
+      h('div', { class: 'label' }, '지침'), h('div', { class: 'small' }, t.prompt),
+      t.routines.length ? [h('div', { class: 'label' }, '루틴'), t.routines.map((r) => h('div', { class: 'small' }, icon('clock', 13), ` ${r.daily_time ? `매일 ${r.daily_time}` : `${r.every_minutes}분마다`} · ${r.prompt}`))] : null,
+      t.apps.length ? [h('div', { class: 'label' }, '함께 쓰는 앱'), h('div', { class: 'attach-row from-bot', style: 'margin-left:0' }, t.apps.map((a) => h('span', { class: 'chip' }, a, connected(a) ? h('span', { class: 'muted' }, ' · 연결됨') : null)))] : null,
+      h('div', { class: 'btns', style: 'margin-top:16px' }, h('button', { class: 'btn primary', onclick: () => createFromTemplate(t) }, '이 템플릿으로 만들기')),
+    ] : null);
+  };
+  draw();
+  openModal(dialog('Bot 템플릿', [search, chips, h('div', { class: 'gallery' }, list, detail)], [
+    h('button', { class: 'btn ghost', onclick: async () => { closeModal(); select(await act('importBot')); } }, icon('download', 15), ' 파일에서 가져오기'),
+    h('button', { class: 'btn', onclick: closeModal }, '닫기')], 'wide'));
+  search.focus();
 }
 
 function openNewBot() {
@@ -1549,8 +1571,8 @@ document.addEventListener('click', (e) => {
 
 window.app = { select, getState: () => S };
 initOnboarding({
-  templates: ASSISTANTS,
-  createTeam: async (picked) => { for (const t of picked) await createAssistant(t as (typeof ASSISTANTS)[number]); },
+  templates: TEMPLATES.slice(0, 4),
+  createTeam: async (picked) => { for (const t of picked) await createAssistant(t as BotTemplate); },
   select,
 });
 buildComposer();
