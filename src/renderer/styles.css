@@ -259,6 +259,9 @@ textarea.field { min-height: 120px; resize: vertical; line-height: 1.5; }
 .dialog-foot { padding: 12px 16px; border-top: 1px solid var(--stroke); display: flex; justify-content: flex-end; gap: 8px; }
 .creator { align-items: center; gap: 18px; }
 .creator .name { text-align: center; }
+.pixel-studio { display: flex; align-items: center; justify-content: center; gap: 24px; }
+.pixel-grid { display: grid; grid-template-columns: repeat(16, 14px); gap: 1px; padding: 6px; border-radius: 10px; background: var(--hover); user-select: none; }
+.pixel-grid button { width: 14px; height: 14px; padding: 0; border: 0; border-radius: 2px; background: var(--bg, #fff); cursor: crosshair; }
 .shapes { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 20px; padding: 0 36px; }
 .shape-btn { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; }
 .shape-btn.sel { box-shadow: 0 0 0 2px var(--pane), 0 0 0 3.5px var(--faint); border-radius: 50%; }

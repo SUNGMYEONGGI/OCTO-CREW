@@ -18,6 +18,7 @@ export interface Bot {
   color: string;
   shape: number;
   image?: string | null; // data URL of an AI profile icon (null clears it)
+  pixels?: string | null; // a hand-drawn 16×16 body: 256 '0'/'1' (null: the shape's own)
   systemPrompt: string;
   model: string; // '' = default; 'openai:<slug>' runs on Codex
   skillIds: string[];
