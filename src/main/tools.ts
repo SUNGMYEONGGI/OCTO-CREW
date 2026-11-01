@@ -14,6 +14,8 @@ import type { Bot, Routine, State, Task } from '../shared/types';
 import type { AgentSdk } from './agent';
 import type { ScheduleInput } from './routines';
 
+export interface NewBot { name: string; role: string; instructions?: string; model?: string; color?: string; shape?: number; greeting?: string }
+
 const within = (root: string, p: string) => p === root || p.startsWith(root + path.sep);
 const realpath = (p: string) => {
   try {
@@ -85,7 +87,7 @@ export interface ToolCtx {
   webhookUrl: (key: string) => string;
   cancelRoutine: (id: string) => void;
   models: () => { value: string; name: string }[];
-  createBot: (args: { name: string; role: string; instructions?: string; model?: string }) => Bot;
+  createBot: (args: NewBot) => Bot;
   createTeam: (name: string, botNames: string[]) => string;
   updateBot: (args: { name: string; role?: string; instructions?: string; model?: string }) => Bot;
   addToTeam: (team: string, botNames: string[]) => string;
@@ -156,6 +158,9 @@ function specs(ctx: ToolCtx): Spec[] {
     spec('create_bot', '새 Bot(에이전트)을 만듭니다. 이름, 역할, 성격·관점을 담은 지침을 정하고, 필요하면 list_models의 value로 모델을 지정하세요. 사용자가 팀이나 Bot을 만들어 달라고 하면 이 도구로 직접 만드세요.', {
       name: z.string().describe('짧고 고유한 이름'), role: z.string().describe('한 줄 역할 설명 (사이드바 라벨)'),
       instructions: z.string().optional().describe('이 Bot의 성격, 관점, 일하는 방식 (시스템 지침)'), model: z.string().optional(),
+      color: z.string().optional().describe('얼굴 색 (#rrggbb). 여러 Bot을 만들 때는 서로 다르게'),
+      shape: z.number().int().min(0).max(13).optional().describe('얼굴 모양 번호 0~13. 여러 Bot을 만들 때는 서로 다르게'),
+      greeting: z.string().max(500).optional().describe('새 Bot에게 전할 짧은 메모. 새 Bot이 이 메모를 보고 사용자에게 먼저 인사합니다'),
     }, async (args) => {
       const bot = ctx.createBot(args);
       return `${bot.name} Bot을 만들었어요${bot.model ? ` (모델 ${bot.model})` : ''}`;

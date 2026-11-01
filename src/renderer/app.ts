@@ -424,7 +424,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
     if (m.brief) {
       let j = i;
       while (j + 1 < list.length && !(list[j + 1].role === 'user' && !list[j + 1].viaBotId)) j++;
-      items.push(...messageItems(c, list.slice(i + 1, j + 1), { ...opts, since: m.ts }), briefItem(m));
+      items.push(...messageItems(c, list.slice(i + 1, j + 1), { ...opts, since: m.ts }), ...(m.fromBotId ? [briefItem(m)] : []));
       i = j;
       lastSender = null;
       continue;
@@ -1162,7 +1162,7 @@ function openNewBot() {
   const name: HTMLInputElement = h('input', { class: 'field name', placeholder: 'Bot 이름 입력', oninput: () => { create.disabled = !name.value.trim(); } });
   const { body, look } = profileEditor(state, name);
   create.onclick = async () => {
-    const id = await act('createBot', name.value.trim(), look());
+    const id = await act('createBot', name.value.trim(), look(), true);
     if (id) { closeModal(); ui.tab = 'details'; select(id); }
   };
   openModal(dialog('새 Bot 만들기', body, [h('button', { class: 'btn', onclick: closeModal }, '취소'), create]));

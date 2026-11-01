@@ -29,7 +29,7 @@ import type { ClaudeUsage, GateResult } from './agent';
 import type { Secrets } from './mcp';
 import type { OauthClient, OauthRecord } from './oauth';
 import type { ScheduleInput } from './routines';
-import type { ToolCtx } from './tools';
+import type { NewBot, ToolCtx } from './tools';
 import { readXlsx, type Sheet } from './xlsx';
 import type { Prompt } from './transcript';
 
@@ -514,7 +514,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     models: () => [...models, ...openaiModels],
     createBot: (args) => {
       const made = createBotFor(args);
-      greet(bot, made);
+      greet(bot, made, args.greeting);
       return made;
     },
     updateBot: (args) => updateBotFor(args),
@@ -861,12 +861,14 @@ function teamNamed(name: string): Conv {
   if (!team) throw new Error(`"${name}" 팀이 없어요. 있는 팀: ${teams.map((c) => c.name).join(', ') || '없음'}`);
   return team;
 }
-function createBotFor({ name, role, instructions, model }: { name: string; role: string; instructions?: string; model?: string }): Bot {
+function createBotFor({ name, role, instructions, model, color, shape }: NewBot): Bot {
   if (!name.trim()) throw new Error('이름이 필요해요');
+  if (color && !/^#[0-9a-f]{6}$/i.test(color)) throw new Error('color는 #rrggbb 형식이어야 해요');
   if (state.bots.some(byName(name))) throw new Error(`"${name}" Bot이 이미 있어요`);
   const known = [...models, ...openaiModels];
   if (model && !known.some((m) => m.value === model)) throw new Error(`모르는 모델이에요. list_models의 value 중에서 고르세요`);
-  const bot = getBot(findConv(actions.createBot(name.trim())).botIds[0]);
+  const look = { ...(color ? { color } : {}), ...(shape !== undefined ? { shape } : {}) };
+  const bot = getBot(findConv(actions.createBot(name.trim(), look)).botIds[0]);
   Object.assign(bot, {
     label: role.trim().slice(0, 80),
     model: model || '',
@@ -886,14 +888,15 @@ function updateBotFor({ name, role, instructions, model }: { name: string; role?
   return bot;
 }
 
-// Like Grok Bot, a Bot made by another Bot says hello first. The maker's note
-// stays folded under the greeting as "보낸 사람 [maker]".
-function greet(from: Bot, bot: Bot): void {
+// Like Grok Bot, a new Bot says hello first. A maker Bot's note stays folded
+// under the greeting as "보낸 사람 [maker]"; without a maker the note is hidden.
+function greet(from: Bot | null, bot: Bot, note?: string): void {
   const dm = state.convs.find((c) => c.kind === 'dm' && c.botIds[0] === bot.id);
   if (!dm) return;
+  const ask = `${state.settings.userName}님에게 먼저 인사하고, 맡은 역할로 무엇을 해 줄 수 있는지와 시작하려면 무엇이 필요한지 2~4문장으로 말하세요. 도구는 쓰지 마세요.`;
   dm.messages.push({
-    id: store.id('msg'), role: 'user', ts: Date.now(), fromBotId: from.id, brief: true,
-    content: `${from.name}이(가) 당신을 만들었어요. ${state.settings.userName}님에게 먼저 인사하고, 맡은 역할로 무엇을 해 줄 수 있는지와 시작하려면 무엇이 필요한지 2~4문장으로 말하세요. 도구는 쓰지 마세요.`,
+    id: store.id('msg'), role: 'user', ts: Date.now(), brief: true, ...(from ? { fromBotId: from.id } : {}),
+    content: note?.trim() ? `${note.trim().slice(0, 500)}\n\n(${ask})` : `${from ? `${from.name}이(가)` : `${state.settings.userName}님이`} 당신을 만들었어요. ${ask}`,
   });
   touch(dm);
   void respond(dm, [bot.id], 'bot');
@@ -1162,13 +1165,15 @@ const actions = {
     state.skills = state.skills.filter((s) => s.id !== id);
     for (const bot of state.bots) bot.skillIds = bot.skillIds.filter((x) => x !== id);
   },
-  createBot(name?: string, look: Partial<Bot> = {}): string {
+  // hello: the new Bot greets the user first (the + menu's 새 Bot).
+  createBot(name?: string, look: Partial<Bot> = {}, hello = false): string {
     const bot: Bot = { ...store.newBot(name || `Bot ${state.bots.length + 1}`, state.bots.length), ...withImageColor(look) };
     bot.serverIds = state.mcpServers.map((s) => s.id);
     bot.skillIds = state.skills.map((s) => s.id);
     state.bots.push(bot);
     const conv = store.newConv('dm', [bot.id]);
     state.convs.push(conv);
+    if (hello) greet(null, bot);
     return conv.id;
   },
   updateBot(id: string, patch: Partial<Bot>) {
