@@ -83,6 +83,7 @@ export interface ToolCtx {
   bot: Bot;
   state: State;
   messageBot: (name: string, message: string) => Promise<string>;
+  messageBots: (names: string[], message: string) => Promise<string>;
   createRoutine: (args: ScheduleInput & { prompt: string }) => Routine;
   webhookUrl: (key: string) => string;
   cancelRoutine: (id: string) => void;
@@ -147,6 +148,9 @@ function specs(ctx: ToolCtx): Spec[] {
     spec('message_bot', '다른 Bot에게 DM을 보내 일을 맡기거나 묻고, 그 Bot의 답을 받아옵니다.', {
       bot_name: z.string(), message: z.string(),
     }, async ({ bot_name: name, message }) => ctx.messageBot(name, message)),
+    spec('message_bots', '여러 Bot에게 같은 일을 동시에 DM으로 맡기고, 모두의 답을 한꺼번에 받아옵니다. 리뷰어 여럿에게 같은 원고를 보낼 때처럼 서로의 답을 볼 필요가 없을 때 쓰세요.', {
+      bot_names: z.array(z.string()).min(2).max(10), message: z.string(),
+    }, async ({ bot_names: names, message }) => ctx.messageBots(names, message)),
     spec('set_status', '채팅 아래에 지금 하는 일을 짧게 보여줍니다 (예: subject "학회 정보", verb "검색 중"). 새 단계를 시작할 때마다 먼저 호출하세요. 사용자에게는 이 표시만 보이고 결과는 따로 알리지 않습니다.', {
       subject: z.string().describe('무엇을 (명사구, 12자 이내)'), verb: z.string().describe('하는 중 (예: 검색 중, 정리 중, 구성 중)'),
     }, async ({ subject, verb }) => {
@@ -175,7 +179,7 @@ function specs(ctx: ToolCtx): Spec[] {
       name: z.string(), bots: z.array(z.string()).describe('팀에 넣을 Bot 이름들'),
     }, async ({ name, bots }) => ctx.createTeam(name, bots)),
     spec('add_to_team', '기존 팀에 Bot을 더 넣습니다.', { team: z.string(), bots: z.array(z.string()) }, async ({ team, bots }) => ctx.addToTeam(team, bots)),
-    spec('message_team', '팀(그룹 채팅)에 메시지를 올리고 팀원들의 답을 받아옵니다. mention에 이름을 주면 그 Bot들만, 비우면 팀원 모두가 차례로 답합니다. 파일을 넘길 때는 작업 폴더 경로를 메시지에 적으세요.', {
+    spec('message_team', '팀(그룹 채팅)에 메시지를 올리고 팀원들의 답을 받아옵니다. mention에 이름을 주면 그 Bot들만, 비우면 팀원 모두가 동시에(최대 3명씩) 답합니다. 파일을 넘길 때는 작업 폴더 경로를 메시지에 적으세요.', {
       team: z.string(), message: z.string(), mention: z.array(z.string()).optional(),
     }, async ({ team, message, mention }) => ctx.messageTeam(team, message, mention)),
     spec('request_meeting_approval', '사용자가 요청하지 않은 회의 초대를 발견하면 참석 여부를 묻는 회의 카드를 보여줍니다. 호출한 뒤에는 바로 턴을 끝내고 사용자의 결정을 기다리세요. 수락·거절하면 캘린더에 응답할 권한이 한 번 주어집니다.', {

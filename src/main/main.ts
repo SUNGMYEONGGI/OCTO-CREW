@@ -488,6 +488,9 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
   const pending = session.id
     ? pendingPrompt(conv, bot.id, promptOpts(), session.cursor)
     : await replayPrompt(conv, bot, signal);
+  // The last message this prompt covers. Team members can answer at the same
+  // time, so the cursor moves only past what this bot was actually shown.
+  const seenId = conv.messages.at(-1)?.id;
   const { images } = pending;
   // "@Notion" in the chat points the bot at that app, even one it isn't set up with.
   const tagged = state.mcpServers.filter((sv) => sv.enabled && pending.text.toLowerCase().includes(`@${sv.name.toLowerCase()}`));
@@ -508,6 +511,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
   const toolCtx: ToolCtx = {
     bot, state,
     messageBot: (name, message) => messageBot(bot, name, message, initiator, conv),
+    messageBots: (names, message) => messageBots(bot, names, message, initiator, conv),
     createRoutine: (args) => createRoutine(conv, bot, args),
     webhookUrl: triggers.webhookUrl,
     cancelRoutine: (id) => { const r = state.routines.find((x) => x.id === id && x.convId === conv.id); if (r) r.enabled = false; },
@@ -738,7 +742,8 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
   // The SDK also sends an error as an assistant message; keep only the error entry below.
   const failed = failure as string | null; // assigned inside callbacks
   if (failed) conv.messages = conv.messages.filter((m) => !(m.role === 'assistant' && m.botId === bot.id && m.content && failed.includes(m.content.trim())));
-  session.cursor = conv.messages.length;
+  const seen = conv.messages.findIndex((m) => m.id === seenId);
+  session.cursor = seenId && seen >= 0 ? seen + 1 : seenId ? conv.messages.length : 0;
   conv.sessions[bot.id] = session;
   if (failed) {
     conv.messages.push({ id: store.id('msg'), role: 'assistant', botId: bot.id, content: '', error: failed.replace(/^Claude Code returned an error result: /, ''), ts: Date.now(), ...tag });
@@ -760,8 +765,9 @@ function notify(bot: Bot, body: string | undefined): void {
 
 // Runs the responders in order; in a group, a reply that @mentions another
 // member hands the conversation to it (bounded so bots can't loop forever).
-async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: Tag = {}): Promise<boolean> {
+async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: Tag = {}, parallel = false): Promise<boolean> {
   if (runtime.running.has(conv.id)) return false;
+  if (parallel) return respondTogether(conv, botIds, initiator);
   const controller = new AbortController();
   runtime.running.set(conv.id, controller);
   runtime.started[conv.id] = Date.now();
@@ -784,6 +790,46 @@ async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: 
     }
   } finally {
     runtime.history = [{ convId: conv.id, botIds: [...ran], initiator, start: runtime.started[conv.id], end: Date.now(), ok: ok && !controller.signal.aborted, stopped: controller.signal.aborted }, ...runtime.history].slice(0, 30);
+    delete runtime.started[conv.id];
+    runtime.running.delete(conv.id);
+    delete runtime.active[conv.id];
+    touch(conv);
+    broadcast();
+  }
+  return ok;
+}
+
+// Team members asked by another bot (message_team) answer at the same time,
+// a few at once; no @mention handoffs.
+const TOGETHER = 3;
+async function respondTogether(conv: Conv, botIds: string[], initiator: Initiator): Promise<boolean> {
+  const controller = new AbortController();
+  runtime.running.set(conv.id, controller);
+  runtime.started[conv.id] = Date.now();
+  const queue = botIds.filter((id) => findBot(id));
+  const working: string[] = [];
+  const show = () => {
+    if (working.length) runtime.active[conv.id] = { botId: working[0], phase: runtime.active[conv.id]?.phase || 'thinking', delegates: working.slice(1), queue };
+    broadcast();
+  };
+  let ok = true;
+  const worker = async () => {
+    for (let id = queue.shift(); id && !controller.signal.aborted; id = queue.shift()) {
+      working.push(id);
+      show();
+      try {
+        ok = (await botTurn(conv, getBot(id), initiator, controller.signal)) && ok;
+      } finally {
+        working.splice(working.indexOf(id), 1);
+        show();
+      }
+    }
+  };
+  const ran = [...queue];
+  try {
+    await Promise.all(Array.from({ length: Math.min(TOGETHER, queue.length) }, worker));
+  } finally {
+    runtime.history = [{ convId: conv.id, botIds: ran, initiator, start: runtime.started[conv.id], end: Date.now(), ok: ok && !controller.signal.aborted, stopped: controller.signal.aborted }, ...runtime.history].slice(0, 30);
     delete runtime.started[conv.id];
     runtime.running.delete(conv.id);
     delete runtime.active[conv.id];
@@ -843,6 +889,21 @@ async function messageBot(from: Bot, name: string, text: string, initiator: Init
   }
   const reply = dm.messages.slice(start).filter((m) => m.role === 'assistant' && (m.content || m.error)).map((m) => m.content || `오류: ${m.error}`).join('\n\n');
   return reply || `${target.name}이(가) 답하지 않았어요`;
+}
+
+// The same task to several bots at once (message_bots), each in its own DM.
+async function messageBots(from: Bot, names: string[], text: string, initiator: Initiator, fromConv: Conv): Promise<string> {
+  const targets = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (targets.length < 2) throw new Error('Bot을 2개 이상 고르세요. 하나면 message_bot을 쓰세요');
+  const replies: string[] = new Array(targets.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < targets.length; i = next++) {
+      replies[i] = await messageBot(from, targets[i], text, initiator, fromConv).catch((err: Error) => `오류: ${err.message}`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(TOGETHER, targets.length) }, worker));
+  return targets.map((name, i) => `[${name}] ${replies[i]}`).join('\n\n');
 }
 
 // Bots and teams made by a bot (create_bot / create_team), like Grok Bot's
@@ -919,7 +980,7 @@ async function messageTeam(from: Bot, team: Conv, text: string, mention: string[
   team.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id });
   touch(team);
   try {
-    await respond(team, targets, 'bot');
+    await respond(team, targets, 'bot', {}, true);
   } finally {
     if (active) active.delegates = (active.delegates || []).filter((id) => !targets.includes(id));
     broadcast();
