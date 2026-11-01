@@ -133,6 +133,7 @@ pre, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 1
 .grouped .msg { max-width: 100%; min-width: 0; border-radius: 16px; }
 .grouped.follow { padding-left: 32px; }
 .attach-row { display: flex; gap: 6px; flex-wrap: wrap; align-self: flex-end; }
+.attach-row.from-bot { align-self: flex-start; margin-left: 30px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--hover); }
 .thumb { max-width: 180px; max-height: 140px; border-radius: 14px; }
 .routine-tag { align-self: center; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }

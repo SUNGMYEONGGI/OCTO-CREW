@@ -20,6 +20,7 @@ function userText(msg: Message, userName: string, skills: Skill[], group: boolea
   if (skill) text = `[사용자가 스킬 "${skill.name}"을(를) 호출했습니다]\n${skill.body}\n\n${text}`;
   for (const a of msg.attachments || []) {
     if (a.text != null) text += `\n\n첨부 파일 ${a.name}:\n\`\`\`\n${a.text}\n\`\`\``;
+    else if (a.path) text += `\n\n첨부 파일 ${a.name}: 작업 폴더의 ${a.path}`;
   }
   return text;
 }

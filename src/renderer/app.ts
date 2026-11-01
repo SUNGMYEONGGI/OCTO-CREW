@@ -412,6 +412,13 @@ function briefItem(m: Message): HTMLElement {
     open ? h('div', { class: 'bundle-body' }, h('div', { class: 'grouped' }, avatar(from, 22), h('div', { class: 'msg bot', html: md(m.content) }))) : null);
 }
 
+// Attached images and files; a file another Bot handed over opens from its chip.
+function attachRow(m: Message, cls = ''): HTMLElement {
+  return h('div', { class: `attach-row ${cls}` }, (m.attachments || []).map((a) => (a.dataUrl ? h('img', { class: 'thumb', src: a.dataUrl, title: '이미지 전체 화면으로 열기' })
+    : a.path && a.botId ? h('button', { class: 'chip', title: '열기', onclick: () => act('openFile', a.botId as string, a.path as string) }, icon('file', 14), a.name)
+    : h('span', { class: 'chip' }, icon('file', 14), a.name))));
+}
+
 // Render items (bubbles, cards, time stamps) for a list of messages.
 function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; since?: number } = {}): HTMLElement[] {
   const items: HTMLElement[] = [];
@@ -446,6 +453,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
     if (m.role === 'user' && m.fromBotId) {
       const from = botById(m.fromBotId);
       if (lastSender !== m.fromBotId) items.push(h('div', { class: 'sender', style: `color:${from?.color || 'inherit'}` }, from?.name || 'Bot'));
+      if (m.attachments?.length) items.push(attachRow(m, 'from-bot'));
       items.push(h('div', { class: 'grouped' }, avatar(from, 22), withExtras(c, m, h('div', { class: 'msg bot', html: md(m.content) }), 'bot', opts)));
       lastSender = m.fromBotId;
       continue;
@@ -454,7 +462,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
       lastSender = 'user';
       const skill = m.skillId && S.skills.find((s) => s.id === m.skillId);
       if (m.routineId) { items.push(h('div', { class: `routine-tag${ui.flashId === m.id ? ' found' : ''}`, 'data-mid': m.id }, icon('clock', 14), m.content.replace(/^⏰ 루틴: /, '루틴 · '))); continue; }
-      if (m.attachments?.length) items.push(h('div', { class: 'attach-row' }, m.attachments.map((a) => (a.dataUrl ? h('img', { class: 'thumb', src: a.dataUrl, title: '이미지 전체 화면으로 열기' }) : h('span', { class: 'chip' }, icon('file', 14), a.name)))));
+      if (m.attachments?.length) items.push(attachRow(m));
       if (skill) items.push(h('div', { class: 'attach-row' }, h('span', { class: 'chip' }, icon('sparkle', 14), skill.name)));
       items.push(withExtras(c, m, m.voice ? voiceBubble({ ...m, voice: m.voice }) : h('div', { class: 'msg user' }, m.content), 'user', opts));
       continue;
