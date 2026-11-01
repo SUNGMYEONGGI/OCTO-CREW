@@ -22,7 +22,7 @@ import type { SandboxMode, ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type {
   ActiveRun, Approval, Attachment, Bot, Conv, Effect, Initiator, LoginStatus, McpServer, Message, ModelInfo,
-  Provider, Routine, Rule, RunRecord, Section, Settings, Skill, State,
+  Provider, Routine, Rule, RunRecord, Section, Settings, Skill, State, Usage,
 } from '../shared/types';
 import type { Call } from './gateway';
 import type { ClaudeUsage, GateResult } from './agent';
@@ -475,14 +475,33 @@ async function replayPrompt(conv: Conv, bot: Bot, signal: AbortSignal): Promise<
   return { text: `(앞선 대화 요약)\n${summary.text}\n\n(최근 대화)\n${recent.text}`, images: recent.images };
 }
 
+// Totals for the whole app and per bot and model (설정 › 사용량).
+function countUsage(botId: string, model: string, costUsd: number, inputTokens: number, outputTokens: number): void {
+  const add = (u: Omit<Usage, 'bots'>) => { u.turns += 1; u.costUsd += costUsd; u.inputTokens += inputTokens; u.outputTokens += outputTokens; };
+  add(state.usage);
+  const perBot = ((state.usage.bots ||= {})[botId] ||= {});
+  add(perBot[model || 'default'] ||= { turns: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 });
+}
+
+// A turn that falls back to the bot's fallback model once when its model is down.
+async function turnWithFallback(conv: Conv, bot: Bot, initiator: Initiator, signal: AbortSignal, tag: Tag = {}): Promise<boolean> {
+  if (await botTurn(conv, bot, initiator, signal, tag)) return true;
+  const last = conv.messages.at(-1);
+  const fallback = bot.fallbackModel;
+  if (signal.aborted || !fallback || fallback === (bot.model || state.settings.model) || !last?.modelDown || last.botId !== bot.id) return false;
+  conv.messages.pop();
+  return botTurn(conv, bot, initiator, signal, tag, fallback);
+}
+
 // One bot answers through the Claude Agent SDK. Returns false on error.
 // tag: fields stamped on every message of this turn ({ threadOf } or { viaBotId }).
-async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: AbortSignal, tag: Tag = {}): Promise<boolean> {
+async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: AbortSignal, tag: Tag = {}, modelOverride?: string): Promise<boolean> {
   conv.sessions ||= {};
   const session = conv.sessions[bot.id] || { id: null, cursor: 0 };
+  const cursorBefore = session.cursor;
   // ChatGPT models run on Codex; switching engines starts a new session that
   // gets the whole chat so far.
-  const model = bot.model || state.settings.model;
+  const model = modelOverride || bot.model || state.settings.model;
   const engine: 'codex' | 'claude' = model.startsWith('openai:') ? 'codex' : 'claude';
   if ((session.engine || 'claude') !== engine) Object.assign(session, { id: null, cursor: 0, engine });
   const pending = session.id
@@ -633,10 +652,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     if (m.type === 'result') {
       session.id = m.session_id;
       const u = m.usage;
-      state.usage.turns += 1;
-      state.usage.costUsd += m.total_cost_usd || 0;
-      state.usage.inputTokens += (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-      state.usage.outputTokens += u.output_tokens || 0;
+      countUsage(bot.id, model, m.total_cost_usd || 0, (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), u.output_tokens || 0);
       if (m.subtype !== 'success') failure = m.errors.join('\n') || m.subtype;
       else if (m.is_error) failure = m.result || m.subtype;
     }
@@ -690,9 +706,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
       if (ev.type === 'turn.failed') failure = ev.error.message;
       if (ev.type === 'error') failure = ev.message;
       if (ev.type === 'turn.completed') {
-        state.usage.turns += 1;
-        state.usage.inputTokens += ev.usage.input_tokens + ev.usage.cached_input_tokens;
-        state.usage.outputTokens += ev.usage.output_tokens;
+        countUsage(bot.id, model, 0, ev.usage.input_tokens + ev.usage.cached_input_tokens, ev.usage.output_tokens);
       }
       if (!('item' in ev)) return;
       const it = ev.item;
@@ -744,9 +758,12 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
   if (failed) conv.messages = conv.messages.filter((m) => !(m.role === 'assistant' && m.botId === bot.id && m.content && failed.includes(m.content.trim())));
   const seen = conv.messages.findIndex((m) => m.id === seenId);
   session.cursor = seenId && seen >= 0 ? seen + 1 : seenId ? conv.messages.length : 0;
+  // A model that couldn't run never read the prompt: the retry sends it again.
+  const down = Boolean(failed && agent.modelDown(failed));
+  if (down && session.engine === (model.startsWith('openai:') ? 'codex' : 'claude')) session.cursor = Math.min(cursorBefore, session.cursor);
   conv.sessions[bot.id] = session;
   if (failed) {
-    conv.messages.push({ id: store.id('msg'), role: 'assistant', botId: bot.id, content: '', error: failed.replace(/^Claude Code returned an error result: /, ''), ts: Date.now(), ...tag });
+    conv.messages.push({ id: store.id('msg'), role: 'assistant', botId: bot.id, content: '', error: failed.replace(/^Claude Code returned an error result: /, ''), ts: Date.now(), ...(down ? { modelDown: true } : {}), ...tag });
   } else {
     const last = [...conv.messages].reverse().find((m) => m.botId === bot.id && (m.content || m.card));
     const card = last?.card;
@@ -782,7 +799,7 @@ async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: 
       const before = conv.messages.length;
       runtime.active[conv.id] = { botId: bot.id, phase: 'thinking', queue, ...tag }; // queue: bots still to answer
       ran.add(bot.id);
-      ok = (await botTurn(conv, bot, initiator, controller.signal, tag)) && ok;
+      ok = (await turnWithFallback(conv, bot, initiator, controller.signal, tag)) && ok;
       if (conv.kind !== 'group' && !tag.threadOf) continue;
       const reply = conv.messages.slice(before).filter((m) => m.role === 'assistant').map((m) => m.content).join('\n');
       const members = (tag.threadOf ? state.bots : conv.botIds.map(findBot).filter(isBot)).filter((b) => b.id !== bot.id);
@@ -818,7 +835,7 @@ async function respondTogether(conv: Conv, botIds: string[], initiator: Initiato
       working.push(id);
       show();
       try {
-        ok = (await botTurn(conv, getBot(id), initiator, controller.signal)) && ok;
+        ok = (await turnWithFallback(conv, getBot(id), initiator, controller.signal)) && ok;
       } finally {
         working.splice(working.indexOf(id), 1);
         show();
@@ -1181,6 +1198,18 @@ function readAttachment(file: string): Attachment {
 
 const actions = {
   // extra: { threadOf } for a thread reply, { voice } for a voice memo.
+  // "다른 모델로 다시 시도" on a model error: the bot keeps the new model.
+  retryWithModel(convId: string, msgId: string, model: string) {
+    const conv = findConv(convId);
+    const i = conv.messages.findIndex((m) => m.id === msgId && m.modelDown);
+    if (i < 0) throw new Error('다시 시도할 오류가 없어요');
+    if (runtime.running.has(conv.id)) throw new Error('지금 다른 Bot이 답하는 중이에요');
+    if (model && ![...models, ...openaiModels].some((m) => m.value === model)) throw new Error('모르는 모델이에요');
+    const [failed] = conv.messages.splice(i, 1);
+    const bot = getBot(failed.botId as string);
+    bot.model = model;
+    void respond(conv, [bot.id], 'user', { ...(failed.threadOf ? { threadOf: failed.threadOf } : {}), ...(failed.viaBotId ? { viaBotId: failed.viaBotId } : {}) });
+  },
   send(convId: string, content: string, attachments: Attachment[] = [], skillId: string | null = null, extra: Partial<Message> = {}) {
     const conv = findConv(convId);
     postUserMessage(conv, { content, attachments, skillId, ...extra });

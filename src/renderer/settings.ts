@@ -1,6 +1,6 @@
 // Settings modal: a left nav and grouped cards.
 import type { Actions } from '../main/main';
-import type { Broadcast, Effect, Provider, Settings, Skill } from '../shared/types';
+import type { Broadcast, Effect, Provider, Settings, Skill, Usage } from '../shared/types';
 import { h, fill, $, act, icon, editing, openModal, closeModal, userAvatar, toggle, avatar, popover, toast, modelName, modelOptions, type Child } from './ui';
 import { LOGOS } from './logos';
 
@@ -85,6 +85,17 @@ const select = <T extends string>(value: T, options: [T, string][], onchange: (v
   options.map(([v, l]) => h('option', { value: v, selected: value === v ? true : null }, l)));
 const set = (patch: Partial<Settings>) => act('updateSettings', patch);
 const link = (href: string, label: string) => h('a', { class: 'btn soft', href, target: '_blank' }, label, icon('external', 14));
+// Which bot spent what, one row per bot and model, busiest first.
+function perBot(u: Usage, tokens: (n: number) => string): Child {
+  const rows = Object.entries(u.bots || {}).flatMap(([botId, byModel]) => Object.entries(byModel).map(([model, t]) => ({ bot: S.bots.find((b) => b.id === botId), model, t })))
+    .filter((r) => r.bot).sort((a, b) => b.t.inputTokens + b.t.outputTokens - (a.t.inputTokens + a.t.outputTokens));
+  if (!rows.length) return null;
+  return h('div', { class: 'group ucard' }, h('div', { class: 'uhead' }, 'Bot별 사용량'),
+    rows.map(({ bot, model, t }) => h('div', { class: 'row', style: 'padding:6px 2px' }, avatar(bot, 22),
+      h('span', { class: 'grow' }, bot?.name, h('span', { class: 'muted' }, ` · ${model === 'default' ? '기본 모델' : modelName(S.models, model)}`)),
+      h('span', { class: 'muted small' }, `턴 ${t.turns.toLocaleString()} · 입력 ${tokens(t.inputTokens)} / 출력 ${tokens(t.outputTokens)}`))));
+}
+
 const cap = (s: string | null | undefined) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 
 const TIMEZONES = ['auto', 'Asia/Seoul', 'Asia/Tokyo', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'UTC'];
@@ -381,6 +392,7 @@ const VIEWS: Record<Tab, () => Child[]> = {
         usage ? 'Claude 구독으로 로그인되어 있지 않아요' : '불러오는 중…'),
       S.settings.chatgpt ? card(icon('openai', 18), 'Codex', usage?.chatgpt?.plan || S.chatgpt?.plan, 'https://chatgpt.com/codex/settings/usage', gpt,
         usage ? 'ChatGPT 사용량을 불러오지 못했어요' : '불러오는 중…') : null,
+      perBot(u, tokens),
       h('div', { class: 'group-note row' }, h('span', { class: 'grow' }, `이 앱 · Bot 턴 ${u.turns.toLocaleString()} · 토큰 입력 ${tokens(u.inputTokens)} / 출력 ${tokens(u.outputTokens)}`),
         h('button', { class: 'btn ghost', onclick: () => { usage = null; draw(true); } }, icon('update', 14), ' 새로고침')),
     ];

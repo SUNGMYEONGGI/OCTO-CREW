@@ -6,6 +6,10 @@ import type { Effect, ModelInfo, ReviewRule } from '../shared/types';
 import type { Call } from './gateway';
 import type { Prompt } from './transcript';
 
+// Quota, rate-limit and retired-model errors: another model may still work.
+const MODEL_DOWN = /rate.?limit|quota|credit|usage limit|limit reached|overloaded|\b(429|529)\b|insufficient|exceeded|billing|not_found_error|model.{0,40}(not found|not available|unavailable|not exist|no access|retired|deprecated|not supported)/i;
+export const modelDown = (error: string): boolean => MODEL_DOWN.test(error);
+
 // The SDK is ESM-only; loaded on first use from the CommonJS main bundle.
 export type AgentSdk = typeof import('@anthropic-ai/claude-agent-sdk');
 let sdk: Promise<AgentSdk> | undefined;

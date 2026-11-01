@@ -24,6 +24,7 @@ export interface Bot {
   serverIds: string[];
   memories: Memory[];
   drafts?: boolean; // false: outside-app writes skip the approval card
+  fallbackModel?: string; // tried once when the model is out of quota, rate limited or gone
 }
 
 export interface Attachment {
@@ -82,6 +83,7 @@ export interface Message {
   // assistant messages
   toolCalls?: ToolCall[];
   error?: string;
+  modelDown?: boolean; // the error says the model can't be used now (quota, rate limit, retired)
   // tool entries
   toolCallId?: string;
   name?: string;
@@ -250,6 +252,7 @@ export interface Usage {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  bots?: Record<string, Record<string, Omit<Usage, 'bots'>>>; // botId -> model -> totals
 }
 
 export interface State {
