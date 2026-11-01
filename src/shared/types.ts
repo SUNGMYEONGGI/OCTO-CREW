@@ -86,6 +86,7 @@ export interface Message {
   modelDown?: boolean; // the error says the model can't be used now (quota, rate limit, retired)
   // tool entries
   toolCallId?: string;
+  parent?: string; // a sub-agent's call (never in the chat): the Task call's id
   name?: string;
   args?: Record<string, unknown>;
   effect?: Effect;
@@ -214,6 +215,8 @@ export interface AuditEntry {
   effect: Effect;
   outcome: 'ok' | 'refused' | 'error';
   output: string;
+  callId?: string; // the tool_use id
+  parent?: string; // a sub-agent's call: the callId of the Task call that started it
 }
 
 export interface Provider {
@@ -284,6 +287,7 @@ export interface ActiveRun {
   phase: 'thinking' | 'working';
   queue: string[];
   delegates?: string[];
+  subagents?: number; // sub-agents (Task calls) still working
   threadOf?: string;
   viaBotId?: string;
   status?: { subject: string; verb: string }; // set_status: "학회 정보 검색 중"

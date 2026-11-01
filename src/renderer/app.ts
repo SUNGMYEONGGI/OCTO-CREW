@@ -1,5 +1,5 @@
 import type { FileEntry } from '../main/tools';
-import type { ActiveRun, Approval, Bot, Broadcast, Conv, MeetingCard, Message, QuestionCard, Routine, Section, Skill, SkillCard, StreamChunk } from '../shared/types';
+import type { ActiveRun, Approval, AuditEntry, Bot, Broadcast, Conv, MeetingCard, Message, QuestionCard, Routine, Section, Skill, SkillCard, StreamChunk } from '../shared/types';
 import { openSettings, renderSettings, planUsage, refreshUsage, confirmLogout, SETTINGS_TABS } from './settings';
 import { openApps, renderApps, serverTile } from './apps';
 import {
@@ -567,8 +567,8 @@ function activityRow(c: Conv): HTMLElement | null {
   if (!bots.length) return null;
   const st = botState(a.botId);
   // set_status: "학회 정보 검색 중", the subject dark and the verb muted.
-  if (a.status && st !== 'blocked') return h('div', { class: 'activity-row' }, avatar(bots[0], 24), h('span', { class: 'who' }, h('span', { class: 'lead' }, a.status.subject), ' ', h('span', { class: 'verb' }, a.status.verb)));
-  const verb = st === 'blocked' ? '승인 기다리는 중' : st === 'streaming' && bots.length === 1 ? '입력 중' : '작업 중';
+  if (a.status && st !== 'blocked') return h('div', { class: 'activity-row' }, avatar(bots[0], 24), h('span', { class: 'who' }, h('span', { class: 'lead' }, a.status.subject), ' ', h('span', { class: 'verb' }, a.status.verb, a.subagents ? ` · 하위 에이전트 ${a.subagents}개 작업 중` : '')));
+  const verb = st === 'blocked' ? '승인 기다리는 중' : a.subagents ? `작업 중 · 하위 에이전트 ${a.subagents}개 작업 중` : st === 'streaming' && bots.length === 1 ? '입력 중' : '작업 중';
   const names = bots.map((b, i) => h('span', { class: i ? '' : 'lead' }, b.name));
   const joined = names.flatMap((n, i) => (i === 0 ? [n] : [i === names.length - 1 ? ' 및 ' : ', ', n]));
   return h('div', { class: 'activity-row' }, avatar(bots[0], 24), h('span', { class: 'who' }, ...joined, ` ${verb}`, h('span', { class: 'ell' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.'))));
@@ -1088,14 +1088,31 @@ function computerTab(c: Conv, bot: Bot): Child[] {
   const screen = running && lastTool
     ? h('div', { class: 'screen' }, h('pre', {}, `$ ${stepLabel(lastTool)}\n\n${(lastTool.content || '실행 중…').slice(-1500)}`))
     : h('div', { class: 'screen' }, h('div', { class: 'zz' }, 'z z'), h('span', { class: 'avatar', html: avatarSvg(0, '#8e8e8e', 34, { sleeping: true }) }), h('div', { style: 'font-weight:500;font-size:14px' }, '컴퓨터가 잠들어 있어요'));
-  const entries = S.audit.filter((a) => a.botId === bot.id).slice(-40).reverse();
+  const mine = S.audit.filter((a) => a.botId === bot.id);
+  // A sub-agent's steps nest under the Task call that started it; while it
+  // still runs (no Task entry yet) they group under "하위 에이전트".
+  const calls = new Set(mine.map((a) => a.callId));
+  const kids = new Map<string, AuditEntry[]>();
+  for (const a of mine) if (a.parent) kids.set(a.parent, [...(kids.get(a.parent) || []), a]);
+  const top = mine.filter((a) => !a.parent).slice(-40);
+  const working = [...kids.keys()].filter((p) => !calls.has(p));
+  const time = (ts: number) => new Date(ts).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+  const entry = (a: AuditEntry): HTMLElement => {
+    const steps = (a.callId && kids.get(a.callId)) || [];
+    return h('details', {},
+      h('summary', { class: 'row small' }, h('span', { class: `badge ${a.outcome}` }, a.outcome), h('span', { class: 'grow ellipsis' }, stepLabel({ name: a.tool, args: a.args } as Message)),
+        steps.length ? h('span', { class: 'muted' }, `하위 에이전트 · ${steps.length}단계`) : null, h('span', { class: 'muted' }, time(a.ts))),
+      steps.length ? h('div', { class: 'list activity sub' }, steps.map(entry)) : null,
+      h('pre', {}, a.output));
+  };
+  const runningSubs = working.map((p) => h('details', { open: true },
+    h('summary', { class: 'row small' }, h('span', { class: 'badge running' }, '실행 중'), h('span', { class: 'grow ellipsis' }, '하위 에이전트'), h('span', { class: 'muted' }, `${kids.get(p)?.length}단계`)),
+    h('div', { class: 'list activity sub' }, (kids.get(p) || []).map(entry))));
   return [
     screen,
     h('div', { class: 'caption' }, `${bot.name}의 화면`),
-    entries.length ? [h('div', { class: 'section-title' }, '최근 활동'),
-      h('div', { class: 'list activity' }, entries.map((a) => h('details', {},
-        h('summary', { class: 'row small' }, h('span', { class: `badge ${a.outcome}` }, a.outcome), h('span', { class: 'grow ellipsis' }, stepLabel({ name: a.tool, args: a.args } as Message)), h('span', { class: 'muted' }, new Date(a.ts).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' }))),
-        h('pre', {}, a.output))))] : null,
+    top.length || runningSubs.length ? [h('div', { class: 'section-title' }, '최근 활동'),
+      h('div', { class: 'list activity' }, runningSubs, [...top].reverse().map(entry))] : null,
   ];
 }
 
