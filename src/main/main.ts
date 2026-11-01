@@ -412,6 +412,7 @@ function finishTool(conv: Conv, bot: Bot, toolMsg: Message, output: string, isEr
     args: JSON.parse(gateway.maskSecrets(JSON.stringify(toolMsg.args), secretValues)),
     effect: toolMsg.effect || 'allow', outcome: toolMsg.effect === 'deny' ? 'refused' : isError ? 'error' : 'ok',
     output: toolMsg.content.slice(0, 4000),
+    ...(toolMsg.toolCallId ? { callId: toolMsg.toolCallId } : {}), ...(toolMsg.parent ? { parent: toolMsg.parent } : {}),
   });
   if (state.audit.length > 1000) state.audit.splice(0, state.audit.length - 1000);
 }
@@ -613,8 +614,28 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     if (!msg) byApiId.set(apiId, (msg = newAssistant()));
     return msg;
   };
+  // Sub-agents (Task calls) work out of the chat: their tool calls only go to
+  // the audit log, nested under the Task call (컴퓨터 tab).
+  const subs = new Set<string>(); // Task calls whose sub-agent is working
+  const countSubs = () => { const a = runtime.active[conv.id]; if (a?.botId === bot.id) { a.subagents = subs.size; broadcast(); } };
+  const onSubagent = (m: SDKMessage, parent: string) => {
+    if (!subs.has(parent) && !toolMsgs.get(parent)?.content) { subs.add(parent); countSubs(); }
+    if (m.type === 'assistant') {
+      for (const b of m.message.content) {
+        if (b.type !== 'tool_use') continue;
+        toolMsgs.set(b.id, { id: store.id('msg'), role: 'tool', botId: bot.id, toolCallId: b.id, name: b.name, args: (b.input || {}) as Record<string, unknown>, content: '', ts: Date.now(), effect: decisions.get(b.id), parent });
+      }
+    }
+    if (m.type === 'user' && Array.isArray(m.message?.content)) {
+      for (const b of m.message.content) {
+        if (typeof b === 'string' || b.type !== 'tool_result') continue;
+        const toolMsg = toolMsgs.get(b.tool_use_id);
+        if (toolMsg) finishTool(conv, bot, toolMsg, agent.resultText(b.content), Boolean(b.is_error), initiator, secretValues);
+      }
+    }
+  };
   const onMessage = (m: SDKMessage) => {
-    if ('parent_tool_use_id' in m && m.parent_tool_use_id) return; // subagent traffic stays inside its Task call
+    if ('parent_tool_use_id' in m && m.parent_tool_use_id) return onSubagent(m, m.parent_tool_use_id);
     if (m.type === 'system' && m.subtype === 'init') session.id = m.session_id;
     if (m.type === 'stream_event') {
       const ev = m.event;
@@ -646,6 +667,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
         if (typeof b === 'string' || b.type !== 'tool_result') continue;
         const toolMsg = toolMsgs.get(b.tool_use_id);
         if (toolMsg) finishTool(conv, bot, toolMsg, agent.resultText(b.content), Boolean(b.is_error), initiator, secretValues);
+        if (subs.delete(b.tool_use_id)) countSubs();
       }
       broadcast();
     }

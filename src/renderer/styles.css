@@ -225,6 +225,8 @@ pre, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 1
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--hover); color: var(--muted); white-space: nowrap; }
 .badge.deny, .badge.refused, .badge.error { color: var(--danger); }
 .badge.ok, .badge.allow { color: var(--ok); }
+.badge.running { color: var(--accent, #1f7aec); }
+.list.activity.sub { margin: 4px 0 6px 14px; padding-left: 8px; border-left: 2px solid var(--hover); }
 .status { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--faint); display: inline-block; }
 .status.connected { background: var(--ok); }
 .status.error { background: var(--danger); }
