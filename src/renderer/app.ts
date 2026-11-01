@@ -419,6 +419,17 @@ function attachRow(m: Message, cls = ''): HTMLElement {
     : h('span', { class: 'chip' }, icon('file', 14), a.name))));
 }
 
+// A model that can't run now (quota, rate limit, retired) offers another one.
+function errorBubble(c: Conv, m: Message): HTMLElement {
+  if (!m.modelDown) return h('div', { class: 'msg error' }, m.error);
+  const bot = botById(m.botId);
+  const pick = h('select', { class: 'select' }, modelOptions(S.models, `기본값 (${modelName(S.models, S.settings.model)})`)
+    .filter(([v]) => v !== (bot?.model ?? '')).map(([v, l]) => h('option', { value: v }, l)));
+  return h('div', { class: 'msg error' }, m.error,
+    h('div', { class: 'retry-row' }, h('span', { class: 'grow' }, '이 모델을 지금 쓸 수 없어요'), pick,
+      h('button', { class: 'btn soft', onclick: () => act('retryWithModel', c.id, m.id, pick.value) }, '다른 모델로 다시 시도')));
+}
+
 // Render items (bubbles, cards, time stamps) for a list of messages.
 function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; since?: number } = {}): HTMLElement[] {
   const items: HTMLElement[] = [];
@@ -470,7 +481,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
     // assistant
     if (!m.content && !m.error) continue;
     const bot = botById(m.botId);
-    const bubble = m.error ? h('div', { class: 'msg error' }, m.error) : withExtras(c, m, botBubble(c, m), 'bot', opts);
+    const bubble = m.error ? errorBubble(c, m) : withExtras(c, m, botBubble(c, m), 'bot', opts);
     if (c.kind !== 'group' && !(opts.inThread && list.some((x) => x.role === 'assistant' && x.botId !== c.botIds[0]))) { items.push(bubble); lastSender = m.botId; continue; }
     const next = list.slice(i + 1).find((x) => x.role !== 'tool');
     const lastOfRun = !next || next.botId !== m.botId || next.role !== 'assistant';
@@ -1289,6 +1300,7 @@ function renderTasks() {
 function openConfigure(bot: Bot) {
   const prompt = h('textarea', { class: 'field', style: 'min-height:150px', value: bot.systemPrompt });
   const model = h('select', { class: 'select' }, modelOptions(S.models, `기본값 (${modelName(S.models, S.settings.model)})`).map(([v, l]) => h('option', { value: v, selected: bot.model === v ? true : null }, l)));
+  const fallback = h('select', { class: 'select' }, [['', '없음'] as [string, string], ...modelOptions(S.models, '').filter(([v]) => v)].map(([v, l]) => h('option', { value: v, selected: (bot.fallbackModel || '') === v ? true : null }, l)));
   const skillIds = new Set(bot.skillIds);
   const serverIds = new Set(bot.serverIds);
   const switchRow = (label: string, set: Set<string>, id: string, extra: Child = null) => h('label', { class: 'row', style: 'padding:6px 2px' }, extra, h('span', { class: 'grow' }, label), toggle(set.has(id), (v) => (v ? set.add(id) : set.delete(id))));
@@ -1297,6 +1309,7 @@ function openConfigure(bot: Bot) {
   openModal(dialog(`${bot.name} 설정`, [
     h('div', { class: 'label' }, '역할'), h('div', { class: 'muted small' }, '이 Bot이 무엇을 하는지, 어떻게 일해야 하는지 적어주세요.'), prompt,
     h('div', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'grow' }, '모델'), model),
+    h('div', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'grow' }, '대체 모델', h('div', { class: 'muted small' }, '사용 한도나 요청 제한으로 모델을 쓸 수 없을 때 한 번 대신 써요')), fallback),
     h('label', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'grow' }, '초안', h('div', { class: 'muted small' }, '메일·메시지처럼 외부 앱에 쓰기 전에 고칠 수 있는 초안을 보여줘요')), toggle(drafts, (v) => { drafts = v; })),
     h('h3', {}, '스킬'), skills.length ? skills.map((s) => switchRow(s.name, skillIds, s.id, icon('sparkle', 15))) : h('div', { class: 'muted small' }, '스킬이 없어요. 설정 › 스킬에서 추가하세요.'),
     h('h3', {}, '앱'), S.mcpServers.length ? S.mcpServers.map((s) => switchRow(s.name, serverIds, s.id, h('span', { class: `status ${S.mcpStatus[s.id]?.status || ''}` }))) : h('div', { class: 'muted small' }, h('button', { class: 'btn ghost', onclick: () => { closeModal(); openApps(); } }, '앱 연결하기')),
@@ -1307,7 +1320,7 @@ function openConfigure(bot: Bot) {
       S.bots.length > 1 && !isMain(bot.id) ? h('button', { class: 'btn ghost danger', onclick: () => confirmThen(`${bot.name}을(를) 삭제할까요?`, '이 Bot과의 대화와 루틴이 지워져요.', () => act('deleteBot', bot.id)) }, 'Bot 삭제') : null),
   ], [
     h('button', { class: 'btn', onclick: closeModal }, '취소'),
-    h('button', { class: 'btn primary', onclick: () => { act('updateBot', bot.id, { systemPrompt: prompt.value, model: model.value, drafts, skillIds: [...skillIds], serverIds: [...serverIds] }); closeModal(); } }, '저장')]));
+    h('button', { class: 'btn primary', onclick: () => { act('updateBot', bot.id, { systemPrompt: prompt.value, model: model.value, fallbackModel: fallback.value, drafts, skillIds: [...skillIds], serverIds: [...serverIds] }); closeModal(); } }, '저장')]));
 }
 
 // ---------- wiring ----------

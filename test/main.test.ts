@@ -13,6 +13,7 @@ import * as providers from '../src/main/providers';
 import * as rename from '../src/main/rename';
 import * as xlsx from '../src/main/xlsx';
 import * as update from '../src/main/update';
+import { modelDown } from '../src/main/agent';
 import { searchMessages } from '../src/shared/search';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -280,5 +281,14 @@ const updateDone = (async () => {
   assert.strictEqual((await update.check('0.3.0', release({ tag_name: 'v0.4.0', html_url: 'https://evil.example/x' })))?.url, 'https://github.com/SUNGMYEONGGI/PixelBot/releases/latest');
   await assert.rejects(update.check('0.3.0', release({}, 403)));
 })();
+
+// Errors that another model might get past.
+assert.equal(modelDown('API Error: 429 {"type":"rate_limit_error"}'), true);
+assert.equal(modelDown('Credit balance is too low'), true);
+assert.equal(modelDown("You've hit your usage limit"), true);
+assert.equal(modelDown('model: claude-x not_found_error'), true);
+assert.equal(modelDown("There's an issue with the selected model (claude-x). It may not exist or you may not have access to it."), true);
+assert.equal(modelDown('중지됨'), false);
+assert.equal(modelDown('ENOENT: no such file'), false);
 
 Promise.all([xlsxDone, updateDone]).then(() => console.log('ok'));
