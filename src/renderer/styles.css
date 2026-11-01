@@ -333,6 +333,16 @@ ol.steps a { color: var(--blue); }
 .tile.logo { background: #fff; border: 1px solid var(--stroke); color: var(--base); }
 .add-btn { min-width: 86px; padding: 6px 14px; border-radius: 999px; background: var(--soft); font-size: 13.5px; font-weight: 500; }
 .add-btn:hover { background: var(--hover); }
+.add-btn.attn { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.attn-pill { padding: 1px 8px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.attn-text { color: var(--accent); }
+.status.auth { background: var(--accent); }
+.apps-body .list .app-row.off { opacity: .6; }
+.apps-body .group-note { margin: -4px 0 8px; }
+.btn.small { padding: 3px 10px; font-size: 12.5px; }
+.plugin-card .plugin-servers { margin: 8px 0 0 46px; display: grid; gap: 8px; }
+.plugin-card .plugin-servers .tile { width: 28px !important; height: 28px !important; }
+.empty-apps { text-align: center; padding: 60px 0; display: grid; gap: 8px; justify-items: center; }
 
 #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--base); color: var(--pane); padding: 10px 18px; border-radius: 12px; display: none; z-index: 80; max-width: 70vw; font-size: 14px; }
 #toast.show { display: block; }
