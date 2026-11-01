@@ -4,7 +4,7 @@ import { openSettings, renderSettings, planUsage, refreshUsage, confirmLogout, S
 import { openApps, renderApps, serverTile } from './apps';
 import {
   h, fill, $, act, icon, avatar, avatarSvg, userAvatar, editing, toast, openModal, closeModal, modalOpen,
-  toggle, popover, relativeDay, shapeOf, SHAPE_COUNT, modelName, modelOptions, setAvatarState,
+  toggle, popover, relativeDay, shapeOf, shapeMask, SHAPE_COUNT, modelName, modelOptions, setAvatarState,
   type Child, type MenuItem,
 } from './ui';
 import { searchMessages } from '../shared/search';
@@ -1179,18 +1179,41 @@ function confirmThen(title: string, text: string, fn: () => void, label = '삭�
 }
 
 // Shape + color picker used by "새 Bot 만들기" and the avatar editor.
-type Look = { shape: number; color: string; image: string | null };
+type Look = { shape: number; color: string; image: string | null; pixels?: string | null };
 function avatarPicker(state: Look, onChange?: () => void) {
   const preview = h('span', { class: 'avatar' });
   const shapes = h('div', { class: 'shapes' });
   const colors = h('div', { class: 'colors' });
   const draw = () => {
-    preview.innerHTML = avatarSvg(state.shape, state.color, 112);
-    fill(shapes, ...Array.from({ length: SHAPE_COUNT }, (_, i) => h('button', { class: `shape-btn${state.shape === i ? ' sel' : ''}`, onclick: () => { state.shape = i; draw(); onChange?.(); }, html: avatarSvg(i, '#9a9a9a', 40) })));
+    preview.innerHTML = avatarSvg(state.shape, state.color, 112, { pixels: state.pixels });
+    fill(shapes, ...Array.from({ length: SHAPE_COUNT }, (_, i) => h('button', { class: `shape-btn${state.shape === i && !state.pixels ? ' sel' : ''}`, onclick: () => { state.shape = i; state.pixels = null; draw(); onChange?.(); }, html: avatarSvg(i, '#9a9a9a', 40) })));
     fill(colors, ...COLORS.map((col) => h('button', { class: `color-btn${state.color === col ? ' sel' : ''}`, style: `background:${col}`, onclick: () => { state.color = col; draw(); onChange?.(); } })));
   };
   draw();
-  return { preview, shapes, colors };
+  return { preview, shapes, colors, draw };
+}
+
+// "픽셀": nudge the body pixel by pixel on its 16×16 grid; drag paints.
+function pixelGrid(state: Look, redraw: () => void): { el: HTMLElement; draw: () => void } {
+  const grid = h('div', { class: 'pixel-grid' });
+  let paint: '0' | '1' | null = null;
+  const set = (i: number) => {
+    const bits = (state.pixels || shapeMask(state.shape)).split('');
+    if (paint === null || bits[i] === paint) return;
+    bits[i] = paint;
+    state.pixels = bits.join('');
+    redraw();
+    draw();
+  };
+  const draw = () => fill(grid, ...(state.pixels || shapeMask(state.shape)).split('').map((bit, i) => h('button', {
+    class: bit === '1' ? 'on' : '', style: bit === '1' ? `background:${state.color}` : '', 'aria-label': `${(i >> 4) + 1}행 ${(i % 16) + 1}열`,
+    onmousedown: (e) => { e.preventDefault(); paint = bit === '1' ? '0' : '1'; set(i); },
+    onmouseenter: () => set(i),
+  })));
+  grid.addEventListener('mouseleave', () => { paint = null; });
+  document.addEventListener('mouseup', () => { paint = null; });
+  draw();
+  return { el: grid, draw };
 }
 
 // Profile: the round character (shape + color) or an AI icon made on ChatGPT
@@ -1200,7 +1223,11 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
   let busy = false;
   let source: string | null = null; // data URL of the image to reinterpret
   const body = h('div', { class: 'dialog-body creator', style: 'padding:6px 0' });
-  const { preview, shapes, colors } = avatarPicker(state);
+  let redrawGrid = () => {};
+  const { preview, shapes, colors, draw: drawPicker } = avatarPicker(state, () => redrawGrid());
+  const grid = pixelGrid(state, drawPicker);
+  redrawGrid = grid.draw;
+  const reset = h('button', { class: 'btn ghost', onclick: () => { state.pixels = null; drawPicker(); grid.draw(); } }, '모양으로 되돌리기');
   const note = h('input', { class: 'field', placeholder: '추가 요청 (선택) · 예: 안경은 유지, 하늘색 머리' });
   const file: HTMLInputElement = h('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: () => file.files?.[0] && take(file.files[0]) });
   const take = (f: File) => { const r = new FileReader(); r.onload = () => { source = r.result as string; draw(); }; r.readAsDataURL(f); };
@@ -1218,8 +1245,12 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
   };
   const seg = h('div', { class: 'seg' });
   const draw = (): void => {
-    fill(seg, ...[['character', '캐릭터'], ['ai', 'AI 프로필']].map(([k, label]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; draw(); } }, label)));
+    fill(seg, ...[['character', '캐릭터'], ['pixels', '픽셀'], ['ai', 'AI 프로필']].map(([k, label]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; draw(); } }, label)));
     if (mode === 'character') return void fill(body, seg, preview, nameField, shapes, colors);
+    if (mode === 'pixels') {
+      grid.draw();
+      return void fill(body, seg, h('div', { class: 'pixel-studio' }, preview, grid.el), nameField, colors, h('div', { style: 'text-align:center' }, reset));
+    }
     const ready = S.chatgpt?.loggedIn && S.settings.chatgpt;
     const face = busy ? h('div', { class: 'spin-wrap' }, h('span', { class: 'ring spin' }))
       : state.image ? avatar({ image: state.image }, 112) : h('div', { class: 'spin-wrap muted' }, icon('image', 30));
@@ -1233,7 +1264,7 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
           h('button', { class: 'btn soft', onclick: () => { closeModal(); openSettings('general'); } }, icon('openai', 15), ' ChatGPT 연결')]));
   };
   draw();
-  return { body, look: () => (mode === 'ai' && state.image ? { image: state.image } : { shape: state.shape, color: state.color, image: null }) };
+  return { body, look: () => (mode === 'ai' && state.image ? { image: state.image } : { shape: state.shape, color: state.color, image: null, pixels: state.pixels || null }) };
 }
 
 // Assistant templates for the + menu.
@@ -1271,7 +1302,7 @@ function openNewBot() {
 }
 
 function openAvatarEditor(bot: Bot) {
-  const { body, look } = profileEditor({ shape: shapeOf(bot), color: bot.color, image: bot.image || null });
+  const { body, look } = profileEditor({ shape: shapeOf(bot), color: bot.color, image: bot.image || null, pixels: bot.pixels || null });
   openModal(dialog('프로필 편집', body, [
     h('button', { class: 'btn', onclick: closeModal }, '취소'),
     h('button', { class: 'btn primary', onclick: () => { act('updateBot', bot.id, look()); closeModal(); } }, '저장')]));

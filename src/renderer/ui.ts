@@ -157,10 +157,29 @@ export const SHAPE_COUNT = SHAPE_POINTS.length;
 // outside get a dark rim on the lower right and a light one on the upper left.
 const GRID = 16;
 const PX = 100 / GRID;
-const spriteCache = new Map<number, Uint8Array>(); // 0 empty, 1 body, 2 shade, 3 highlight
+const spriteCache = new Map<number | string, Uint8Array>(); // 0 empty, 1 body, 2 shade, 3 highlight
 function sprite(i: number): Uint8Array {
   const cached = spriteCache.get(i);
   if (cached) return cached;
+  const out = shade(rasterize(i));
+  spriteCache.set(i, out);
+  return out;
+}
+
+// A hand-drawn body (Bot.pixels), shaded like the shapes.
+const isPixels = (p: unknown): p is string => typeof p === 'string' && /^[01]{256}$/.test(p);
+function drawn(pixels: string): Uint8Array {
+  const cached = spriteCache.get(pixels);
+  if (cached) return cached;
+  const out = shade(Uint8Array.from(pixels, (ch) => (ch === '1' ? 1 : 0)));
+  spriteCache.set(pixels, out);
+  return out;
+}
+
+// A shape's body as Bot.pixels, the pixel editor's starting point.
+export const shapeMask = (i: number): string => Array.from(sprite(Number.isInteger(i) && i < SHAPE_COUNT ? i : 0), (v) => (v ? '1' : '0')).join('');
+
+function rasterize(i: number): Uint8Array {
   const pts = SHAPE_POINTS[i]();
   const max = Math.max(...pts.flat().map(Math.abs));
   const poly = pts.map(([x, y]) => [50 + (x / max) * 46, 53 + (y / max) * 46]);
@@ -175,6 +194,10 @@ function sprite(i: number): Uint8Array {
   };
   const g = new Uint8Array(GRID * GRID);
   for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) g[r * GRID + c] = inside((c + 0.5) * PX, (r + 0.5) * PX) ? 1 : 0;
+  return g;
+}
+
+function shade(g: Uint8Array): Uint8Array {
   const on = (r: number, c: number) => r >= 0 && c >= 0 && r < GRID && c < GRID && g[r * GRID + c] > 0;
   const out = g.slice();
   for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) {
@@ -182,7 +205,6 @@ function sprite(i: number): Uint8Array {
     if (!on(r + 1, c) || !on(r, c + 1)) out[r * GRID + c] = 2;
     else if (!on(r - 1, c) || !on(r, c - 1)) out[r * GRID + c] = 3;
   }
-  spriteCache.set(i, out);
   return out;
 }
 
@@ -213,11 +235,12 @@ function runs(g: Uint8Array, colors: string[]): string {
 
 // Body and eyes are separate groups so CSS can animate them: .av-body moves the
 // whole bot, .av-look shifts the eyes (gaze), .eye blinks.
-export function avatarSvg(shape = 0, color = '#999', size = 40, { sleeping = false } = {}): string {
+export function avatarSvg(shape = 0, color = '#999', size = 40, { sleeping = false, pixels = null as string | null | undefined } = {}): string {
   const i = Number.isInteger(shape) && shape < SHAPE_COUNT ? shape : 0;
   if (!/^#[0-9a-f]{6}$/i.test(color)) color = '#999999'; // it lands in markup
-  const body = runs(sprite(i), ['', color, tint(color, -0.32), tint(color, 0.28)]);
-  const leaf = i === SHAPE_COUNT - 1 ? px(8, 0, 1, 2, '#3a2a1a') + px(9, 0, 2, 1, '#2ec27e') + px(10, 1, 2, 1, '#2ec27e') : '';
+  const own = isPixels(pixels);
+  const body = runs(own ? drawn(pixels) : sprite(i), ['', color, tint(color, -0.32), tint(color, 0.28)]);
+  const leaf = !own && i === SHAPE_COUNT - 1 ? px(8, 0, 1, 2, '#3a2a1a') + px(9, 0, 2, 1, '#2ec27e') + px(10, 1, 2, 1, '#2ec27e') : '';
   // The two white eyes, the right one a pixel higher (the old tilted look).
   const eyes = sleeping
     ? px(6, 8, 2, 1, '#fff') + px(9, 8, 2, 1, '#fff')
@@ -238,7 +261,7 @@ export function avatar(bot: Partial<Bot> | null | undefined, size: number, state
   // A negative delay keeps looping animations in phase across re-renders.
   const attrs = { 'data-bot': bot?.id || null, 'data-st': state, style: `width:${size}px;height:${size}px;--t0:-${Date.now() % 6000}ms` };
   if (bot?.image) return h('span', { ...attrs, class: 'avatar img' }, h('img', { src: bot.image, alt: '' }));
-  return h('span', { ...attrs, class: 'avatar', html: avatarSvg(shapeOf(bot), bot?.color || '#999', size) });
+  return h('span', { ...attrs, class: 'avatar', html: avatarSvg(shapeOf(bot), bot?.color || '#999', size, { pixels: bot?.pixels }) });
 }
 
 // Idle eyes follow the pointer.
