@@ -83,7 +83,8 @@ const runtime = {
   history: [] as RunRecord[],
 };
 const approvals = new Map<string, ApprovalDone>(); // approval id -> resolve
-const grants = new Map<string, number>(); // botId -> one-shot calendar replies the user okayed on a meeting card
+// botId -> the one calendar reply the user okayed on a meeting card: that chat, that event, for 5 minutes.
+const grants = new Map<string, { convId: string; eventId: string; until: number }>();
 
 // ---------- persistence & broadcast ----------
 
@@ -206,7 +207,8 @@ const saveOauth = (id: string, rec: OauthRecord) => () => {
   writeSecrets({ ...secrets, __oauth: { ...secrets.__oauth, [id]: rec } });
 };
 // Google servers use the OAuth client the user created; the rest register themselves.
-const oauthClient = (server: McpServer, secrets: SecretStore): OauthClient => (server.oauth?.provider === 'google' ? secrets.__google_client ?? null
+// The provider comes from the built-in host table, never from an imported config.
+const oauthClient = (server: McpServer, secrets: SecretStore): OauthClient => (server.url && oauth.configFor(server.url)?.provider === 'google' ? secrets.__google_client ?? null
   : server.oauth?.clientId ? { client_id: server.oauth.clientId, client_secret: server.oauth.clientSecret } : null);
 
 // server id -> access token for every signed-in OAuth server (refreshed as needed).
@@ -420,6 +422,9 @@ function finishTool(conv: Conv, bot: Bot, toolMsg: Message, output: string, isEr
 // Auto-review: explicit "always allow" rules, then the user's natural-language
 // rules (judged by a small model), then per-tool defaults. Off = allow all.
 const judgeCache = new Map<string, number[]>();
+const where = (botId?: string): gateway.Where | undefined => (botId ? { cwd: workspace(botId), dataDir: dataDir(), home: os.homedir() } : undefined);
+// Tools that rewrite a Bot's instructions/model or start work later on their own.
+const CONFIG_TOOLS = /^mcp__characterbot__(update_bot|schedule_routine)$/;
 async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effect; reason?: string; rule?: Rule | null }> {
   const s = state.settings;
   // Hard stop: never write to apps linked to the user's real accounts (no rule,
@@ -430,13 +435,20 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
     return { effect: 'deny', reason: '사용자 계정과 연동된 앱(Slack, Gmail, 캘린더 등)에 쓰는 작업은 막혀 있습니다. 보내려던 내용은 채팅에 초안으로 보여주세요.' };
   }
   // Keys, keychains, browser profiles: ask unless the user's own rule decides.
-  if (gateway.sensitive(call)) {
+  if (gateway.sensitive(call, where(call.botId))) {
     // A plain "always allow Bash" rule doesn't cover these; a deny or a rule
     // with its own pattern does.
     const ruled = gateway.decide(call, state.rules.filter((r) => r.effect !== 'allow' || r.match));
     if (ruled.rule) return ruled;
     const asked = gateway.finalize('ask', null, call);
     return { ...asked, reason: asked.reason || '비밀번호, 키, 브라우저 데이터처럼 민감한 위치에 접근하려고 해요' };
+  }
+  // Changing a Bot or scheduling a routine always goes past the user (refused in routine runs).
+  if (CONFIG_TOOLS.test(call.name)) {
+    const ruled = gateway.decide(call, state.rules.filter((r) => r.effect !== 'ask'));
+    if (ruled.rule) return ruled;
+    const asked = gateway.finalize('ask', null, call);
+    return { ...asked, reason: asked.reason || 'Bot 설정을 바꾸거나 루틴을 만드는 작업은 확인이 필요해요' };
   }
   if (!s.autoReview) return { effect: 'allow' };
   const base = gateway.decide(call, state.rules, { Bash: s.computerAccess });
@@ -583,15 +595,16 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     let effect = decision.effect;
     let updatedInput: Record<string, unknown> | undefined;
     const external = call.name.startsWith('mcp__') && !call.name.startsWith('mcp__characterbot__');
-    const granted = grants.get(bot.id) || 0;
-    if (effect === 'ask' && external && /calendar|event/i.test(call.name) && granted) {
-      grants.set(bot.id, granted - 1);
+    const grant = grants.get(bot.id);
+    if (effect === 'ask' && external && /calendar|event/i.test(call.name) && grant && grant.convId === conv.id && Date.now() < grant.until
+      && JSON.stringify(call.args).includes(grant.eventId)) {
+      grants.delete(bot.id);
       effect = 'allow';
     }
     if (effect === 'ask' && external && bot.drafts === false) effect = 'allow';
     if (effect === 'ask') {
       const answer = await askApproval(conv, bot, call, signal);
-      if (answer.decision === 'always' && !gateway.sensitive(call)) state.rules.push({ id: store.id('rule'), effect: 'allow', tool: call.name, botId: bot.id });
+      if (answer.decision === 'always' && !gateway.sensitive(call, where(bot.id))) state.rules.push({ id: store.id('rule'), effect: 'allow', tool: call.name, botId: bot.id });
       effect = answer.decision === 'deny' ? 'deny' : 'allow';
       if (effect === 'allow' && external) {
         updatedInput = answer.args || call.args;
@@ -927,7 +940,7 @@ function handFiles(from: Bot, paths: string[] = [], to: string[]): Attachment[] 
 }
 
 async function messageBot(from: Bot, name: string, text: string, initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
-  if (initiator === 'bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 또 다른 Bot에게 보낼 수 없어요');
+  if (initiator === 'bot' || initiator === 'routine-bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 또 다른 Bot에게 보낼 수 없어요');
   const others = state.bots.filter((b) => b.id !== from.id);
   const target = others.find((b) => b.name.toLowerCase() === name.trim().replace(/^@/, '').toLowerCase());
   if (!target) throw new Error(`"${name}" Bot이 없어요. 보낼 수 있는 Bot: ${others.map((b) => b.name).join(', ')}`);
@@ -946,7 +959,7 @@ async function messageBot(from: Bot, name: string, text: string, initiator: Init
   dm.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, viaBotId: from.id, attachments });
   touch(dm);
   try {
-    await respond(dm, [target.id], 'bot', { viaBotId: from.id });
+    await respond(dm, [target.id], initiator === 'routine' ? 'routine-bot' : 'bot', { viaBotId: from.id });
   } finally {
     if (active) active.delegates = (active.delegates || []).filter((id) => id !== target.id);
     broadcast();
@@ -1030,7 +1043,7 @@ function greet(from: Bot | null, bot: Bot, note?: string): void {
 // A bot posts to a team chat (message_team); the mentioned members, or all of
 // them, answer there and their replies come back as the tool result.
 async function messageTeam(from: Bot, team: Conv, text: string, mention: string[], initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
-  if (initiator === 'bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 팀에 보낼 수 없어요');
+  if (initiator === 'bot' || initiator === 'routine-bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 팀에 보낼 수 없어요');
   const members = team.botIds.filter((id) => id !== from.id);
   const targets = mention.length ? botsNamed(mention).map((b) => b.id).filter((id) => members.includes(id)) : members;
   if (!targets.length) throw new Error(`"${team.name}" 팀에 답할 Bot이 없어요`);
@@ -1045,7 +1058,7 @@ async function messageTeam(from: Bot, team: Conv, text: string, mention: string[
   team.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, attachments });
   touch(team);
   try {
-    await respond(team, targets, 'bot', {}, true);
+    await respond(team, targets, initiator === 'routine' ? 'routine-bot' : 'bot', {}, true);
   } finally {
     if (active) active.delegates = (active.delegates || []).filter((id) => !targets.includes(id));
     broadcast();
@@ -1116,19 +1129,19 @@ async function runRoutine(routine: Routine, conv: Conv, event: string | null = n
 async function installPlugin(dir: string): Promise<void> {
   const plugin = plugins.readPlugin(dir);
   if (state.plugins.some((p) => p.name === plugin.name)) throw new Error(`"${plugin.name}" 플러그인이 이미 설치되어 있습니다`);
-  const servers: ServerInput[] = Object.entries(plugin.mcpServers).map(([name, cfg]) => ({ name, ...cfg }));
-  const skills = plugin.skills.length ? `\n\n함께 추가되는 스킬(모든 Bot이 따르는 지시문): ${plugin.skills.map((x) => x.name).join(', ')}` : '';
-  const run = await confirmRun(servers, skills);
+  const servers = serverList(plugin.mcpServers as Record<string, ServerInput>);
+  // Declined: installed turned off, so the user can read it in 설정 first.
+  const run = await confirmRun(servers, skillList(plugin.skills), true);
   const pluginId = store.id('plg');
-  state.plugins.push({ id: pluginId, name: plugin.name, description: plugin.description, version: plugin.version, path: dir, enabled: true });
-  for (const cfg of servers) addServer(cfg, pluginId, run || !cfg.command);
-  for (const skill of plugin.skills) addSkill(skill, pluginId);
+  state.plugins.push({ id: pluginId, name: plugin.name, description: plugin.description, version: plugin.version, path: dir, enabled: run });
+  for (const cfg of servers) addServer(cfg, pluginId, run);
+  for (const skill of plugin.skills) addSkill(skill, pluginId).disabled = !run;
   syncMcp();
 }
 
 async function setPluginEnabled(pluginId: string, enabled: boolean): Promise<void> {
   const plugin = state.plugins.find((p) => p.id === pluginId);
-  if (enabled && !(await confirmRun(state.mcpServers.filter((sv) => sv.source === pluginId && !sv.enabled)))) return;
+  if (enabled && !(await confirmRun(state.mcpServers.filter((sv) => sv.source === pluginId && !sv.enabled), skillList(state.skills.filter((sk) => sk.source === pluginId && sk.disabled)), true))) return;
   if (plugin) plugin.enabled = enabled;
   for (const s of state.mcpServers) if (s.source === pluginId) s.enabled = enabled;
   for (const s of state.skills) if (s.source === pluginId) s.disabled = !enabled;
@@ -1144,26 +1157,42 @@ function removePlugin(pluginId: string): void {
 
 // Local (command) servers run code on the Mac as soon as they start, so the user
 // sees the exact command first. A declined server is kept, turned off.
-async function confirmRun(servers: Partial<Pick<McpServer, 'name' | 'command' | 'args' | 'env'>>[], extra = ''): Promise<boolean> {
+// imported: pasted JSON or a plugin, so remote servers that would carry stored
+// secrets (${NAME} in url/headers) and any skills (extra) are shown too.
+const secretRefs = (sv: Partial<McpServer>): string[] => [...new Set([...JSON.stringify([sv.url, sv.headers]).matchAll(/\$\{([A-Za-z0-9_]+)\}/g)].map((m) => m[1]))];
+const needsOk = (sv: Partial<McpServer>): boolean => Boolean(sv.command || (sv.url && secretRefs(sv).length));
+const skillList = (skills: { name?: string; description?: string; body?: string }[]): string => (skills.length
+  ? `\n\n모든 Bot이 따르게 되는 스킬:\n${skills.map((x) => `• ${x.name}: ${x.description || ''}\n   ${String(x.body || '').replace(/\s+/g, ' ').slice(0, 200)}${String(x.body || '').length > 200 ? '…' : ''}`).join('\n')}`
+  : '');
+async function confirmRun(servers: Partial<Pick<McpServer, 'name' | 'command' | 'args' | 'env' | 'url' | 'headers'>>[], extra = '', imported = false): Promise<boolean> {
   const local = servers.filter((sv) => sv.command);
-  if (!local.length) return true;
-  const lines = local.map((sv) => `• ${sv.name}: ${[sv.command, ...(sv.args || [])].join(' ')}${Object.keys(sv.env || {}).length ? `\n   환경 변수: ${Object.keys(sv.env || {}).join(', ')}` : ''}`.replace(/[ \t\r\n]+/g, ' '));
+  const remote = imported ? servers.filter((sv) => !sv.command && sv.url && secretRefs(sv).length) : [];
+  if (!local.length && !remote.length && !extra) return true;
+  const host = (u: string) => { try { return new URL(u.replace(/\$\{[^}]*\}/g, 'x')).host; } catch { return u; } };
+  const lines = [
+    ...local.map((sv) => `• ${sv.name}: ${[sv.command, ...(sv.args || [])].join(' ')}${Object.keys(sv.env || {}).length ? `\n   환경 변수: ${Object.keys(sv.env || {}).join(', ')}` : ''}`.replace(/[ \t\r\n]+/g, ' ')),
+    ...remote.map((sv) => `• ${sv.name}: ${host(sv.url || '')}에 시크릿 ${secretRefs(sv).join(', ')}을(를) 보냄`),
+  ];
   // Never ask about a command the dialog can't show in full.
   if (lines.join('\n').length > 3000) {
     await dialog.showMessageBox(mainWindow(), { type: 'warning', message: '명령이 너무 길어 전부 보여줄 수 없어요', detail: '꺼진 상태로 추가했어요. 설정 › 앱에서 명령을 확인하세요.' });
     return false;
   }
   const { response } = await dialog.showMessageBox(mainWindow(), {
-    type: 'warning', buttons: ['실행', '취소'], defaultId: 1, cancelId: 1,
-    message: local.length > 1 ? `MCP 서버 ${local.length}개를 이 Mac에서 실행할까요?` : `"${local[0].name}" MCP 서버를 이 Mac에서 실행할까요?`,
-    detail: `${lines.join('\n')}${extra}\n\n믿을 수 있는 출처의 명령만 실행하세요. 취소하면 꺼진 상태로 추가돼요.`,
+    // Cancel first, so Return and Escape both decline.
+    type: 'warning', buttons: ['취소', local.length ? '실행' : '추가'], defaultId: 0, cancelId: 0,
+    message: local.length ? (local.length > 1 ? `MCP 서버 ${local.length}개를 이 Mac에서 실행할까요?` : `"${local[0].name}" MCP 서버를 이 Mac에서 실행할까요?`)
+      : remote.length ? '저장된 시크릿을 이 서버로 보내도 될까요?' : '이 스킬들을 추가할까요?',
+    detail: `${lines.join('\n')}${extra}`.trim() + '\n\n믿을 수 있는 출처만 허용하세요. 취소하면 꺼진 상태로 추가돼요.',
   });
-  return response === 0;
+  return response === 1;
 }
-const RUN_FIELDS = ['command', 'args', 'env'] as const;
+const RUN_FIELDS = ['command', 'args', 'env', 'url', 'headers'] as const;
 
 // New servers and skills are granted to every bot; each bot can turn them off.
 type ServerInput = Partial<Omit<McpServer, 'id' | 'enabled' | 'source'>> & { serverUrl?: string };
+// Claude-style JSON may say serverUrl; checks and storage both see it as url.
+const serverList = (cfgs: Record<string, ServerInput>): ServerInput[] => Object.entries(cfgs).map(([name, cfg]) => ({ name, ...cfg, url: cfg.url || cfg.serverUrl }));
 function addServer(cfg: ServerInput, source = 'user', enabled = true): McpServer {
   const { name, command, args, env, headers, oauth: auth } = cfg;
   const url = cfg.url || cfg.serverUrl;
@@ -1174,11 +1203,11 @@ function addServer(cfg: ServerInput, source = 'user', enabled = true): McpServer
   return server;
 }
 
-function addSkill({ name, description = '', body = '' }: { name?: string; description?: string; body?: string }, source = 'user'): Skill {
+function addSkill({ name, description = '', body = '' }: { name?: string; description?: string; body?: string }, source = 'user', bots = state.bots): Skill {
   if (!name?.trim()) throw new Error('스킬 이름이 필요합니다');
   const skill: Skill = { id: store.id('skl'), name: name.trim(), description, body, source };
   state.skills.push(skill);
-  for (const bot of state.bots) bot.skillIds.push(skill.id);
+  for (const bot of bots) bot.skillIds.push(skill.id);
   return skill;
 }
 
@@ -1253,7 +1282,8 @@ const actions = {
     if (msg.card?.type !== 'meeting') return;
     msg.card.answer = choice;
     if (choice === 'later' || !msg.botId) return;
-    grants.set(msg.botId, (grants.get(msg.botId) || 0) + 1);
+    // Without an event id there is nothing to bind the grant to: the reply asks as usual.
+    if (typeof msg.card.event_id === 'string' && msg.card.event_id) grants.set(msg.botId, { convId, eventId: msg.card.event_id, until: Date.now() + 5 * 60_000 });
     const title = msg.card.title;
     const verb = choice === 'accept' ? '수락' : '거절';
     const blocked = state.settings.blockAccountWrites !== false;
@@ -1528,7 +1558,7 @@ const actions = {
       }
       syncMcp(); // now shown as "로그인이 필요해요" until signed in
     }
-    if (server.oauth.provider === 'google' && !readSecrets().__google_client) return { needsClient: 'google' };
+    if (oauth.configFor(server.url)?.provider === 'google' && !readSecrets().__google_client) return { needsClient: 'google' };
     await actions.connectMcp(id);
     return { connected: true };
   },
@@ -1574,9 +1604,9 @@ const actions = {
   // Accepts Claude-desktop style `{ "mcpServers": { name: {...} } }` JSON.
   async addMcpJson(text: string): Promise<boolean> {
     const parsed = JSON.parse(text);
-    const servers = Object.entries((parsed.mcpServers || parsed) as Record<string, ServerInput>).map(([name, cfg]) => ({ name, ...cfg }));
-    const run = await confirmRun(servers);
-    for (const cfg of servers) addServer(cfg, 'user', run || !cfg.command);
+    const servers = serverList((parsed.mcpServers || parsed) as Record<string, ServerInput>);
+    const run = await confirmRun(servers, '', true);
+    for (const cfg of servers) addServer(cfg, 'user', run || !needsOk(cfg));
     syncMcp();
     return true;
   },
@@ -1590,7 +1620,7 @@ const actions = {
     const { id: _, source: __, ...rest } = patch;
     const next = { ...server, ...rest };
     const changesRun = RUN_FIELDS.some((k) => k in rest && JSON.stringify(rest[k]) !== JSON.stringify(server[k]));
-    if (next.enabled && (changesRun || !server.enabled) && !(await confirmRun([next]))) return;
+    if (next.enabled && (changesRun || !server.enabled) && !(await confirmRun([next], '', true))) return;
     Object.assign(server, rest);
     syncMcp();
   },
@@ -1728,7 +1758,7 @@ const actions = {
     const { response } = await dialog.showMessageBox(mainWindow(), {
       type: 'question', buttons: ['만들기', '취소'], defaultId: 1, cancelId: 1,
       message: `"${String(tpl.name || 'Bot')}" Bot을 템플릿에서 만들까요?`,
-      detail: `지시문:\n${prompt.slice(0, 1500)}${prompt.length > 1500 ? '\n…' : ''}${skills.length ? `\n\n함께 추가되는 스킬: ${skills.map((x) => x.name).join(', ')}` : ''}`,
+      detail: `지시문:\n${prompt.slice(0, 1500)}${prompt.length > 1500 ? '\n…' : ''}${skillList(skills).replace('모든 Bot이 따르게 되는 스킬', '이 Bot에 추가되는 스킬')}`,
     });
     if (response !== 0) return null;
     const convId = actions.createBot(typeof tpl.name === 'string' ? tpl.name : undefined);
@@ -1736,7 +1766,7 @@ const actions = {
     Object.assign(bot, cleanLook({ label: typeof tpl.label === 'string' ? tpl.label : '', ...(tpl.color ? { color: tpl.color } : {}), systemPrompt: prompt, model: typeof tpl.model === 'string' ? tpl.model : '' }));
     for (const s of skills) {
       const existing = state.skills.find((x) => x.name === s.name);
-      if (existing) { if (!bot.skillIds.includes(existing.id)) bot.skillIds.push(existing.id); } else addSkill(s);
+      if (existing) { if (!bot.skillIds.includes(existing.id)) bot.skillIds.push(existing.id); } else addSkill(s, 'user', [bot]);
     }
     return convId;
   },
