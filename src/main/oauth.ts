@@ -81,7 +81,9 @@ function listen(expectedState: string): { code: Promise<string>; close: () => vo
     const handler: http.RequestListener = (req, res) => {
       const url = new URL(req.url || '/', REDIRECT_URI);
       if (url.pathname !== '/oauth/callback') return void res.writeHead(404).end();
-      const ok = url.searchParams.get('code') && url.searchParams.get('state') === expectedState;
+      // Another local page can hit this port: a request without our state is ignored, not fatal.
+      if (url.searchParams.get('state') !== expectedState) return void res.writeHead(400).end();
+      const ok = url.searchParams.get('code');
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
         .end(`<meta charset="utf-8"><body style="font:16px -apple-system;padding:48px">${ok ? '연결됐어요. 이 창을 닫고 앱으로 돌아가세요.' : '연결하지 못했어요. 앱에서 다시 시도해 주세요.'}</body>`);
       if (ok) finish(null, url.searchParams.get('code') || '');

@@ -5,6 +5,8 @@
 // Bots have full permissions by default, except that a connected (external) app
 // asks before anything that isn't a read. The user's rules and per-tool settings
 // (e.g. Bash under settings › 컴퓨터) come first.
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Effect, Initiator, Rule } from '../shared/types';
 
 export interface Call {
@@ -46,11 +48,33 @@ const SENSITIVE = [
   /Library\/Application Support\/(Google\/Chrome|BraveSoftware|Microsoft Edge|Arc|Firefox|Vivaldi|com\.operasoftware)/, /Library\/Safari\b/, /Library\/Messages\b/, /Library\/Mail\b/,
   /\bsecrets\.bin\b/, /Application Support\/(PixelBot|CharacterBot)( Dev)?\/state\.json/,
 ];
-function sensitive(call: Call): boolean {
+// Where the Bot runs: its workspace sits inside the app's data folder, so a
+// relative path (../../state.json) reaches the app's own files.
+export interface Where { cwd: string; dataDir: string; home: string }
+const real = (p: string): string => {
+  try { return fs.realpathSync(p); } catch { return p; } // not there yet: judge the spelled path
+};
+function sensitive(call: Call, where?: Where): boolean {
   if (call.name.startsWith('mcp__')) return false;
   // What a file tool writes is content, not a target: only its path counts.
   const args = /^(Write|Edit|MultiEdit|NotebookEdit)$/.test(call.name) ? { path: call.args?.file_path ?? call.args?.notebook_path } : call.args || {};
-  const text = JSON.stringify(args).replace(/\\\//g, '/');
+  // Shell-escaped spaces (Application\ Support) count as spaces.
+  let text = JSON.stringify(args).replace(/\\\//g, '/').replace(/\\\\ /g, ' ');
+  if (where) {
+    text = text.replace(/(^|[\s"'=:])(~|\$HOME|\$\{HOME\})(?=\/|[\s"']|$)/g, `$1${where.home}`);
+    const paths = ['path', 'file_path', 'notebook_path'].map((k) => (args as Record<string, unknown>)[k]).filter((v): v is string => typeof v === 'string' && v !== '')
+      .map((v) => real(path.resolve(where.cwd, v.replace(/^~(?=\/|$)/, where.home))));
+    text += JSON.stringify(paths);
+    // The app's data folder (state.json, secrets.bin, codex/, bin/stt) outside this Bot's own workspace.
+    const inData = (p: string) => p === where.dataDir || p.startsWith(where.dataDir + path.sep);
+    const own = (p: string) => p === where.cwd || p.startsWith(where.cwd + path.sep);
+    if (paths.some((p) => inData(p) && !own(p))) return true;
+    if (text.split(where.cwd).join('').includes(where.dataDir)) return true;
+    // The workspace is inside the data folder, so any step up in a command or pattern leaves it.
+    if (Object.entries(args).some(([k, v]) => typeof v === 'string' && !/^(content|new_string|old_string|description|prompt)$/.test(k) && /(^|[\s"'=/:;|&(])\.\.(\/|[\s"';|&)]|$)/.test(v))) return true;
+    // Globs that spell a hidden folder in the home directory (~/.ss?/id_*).
+    if (text.includes(`${where.home}/.`) && new RegExp(`${where.home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.[^/\\s"]*[?*[]`).test(text)) return true;
+  }
   return SENSITIVE.some((re) => re.test(text));
 }
 
@@ -90,7 +114,7 @@ function combine(effects: Effect[]): Effect | null {
 
 // Nobody is watching a scheduled run, so "ask" fails closed.
 function finalize(effect: Effect, rule: Rule | null, call: Call): Decision {
-  if (effect === 'ask' && call.initiator === 'routine') {
+  if (effect === 'ask' && (call.initiator === 'routine' || call.initiator === 'routine-bot')) {
     return { effect: 'deny', rule, reason: '루틴 실행 중에는 승인이 필요한 작업을 할 수 없습니다' };
   }
   return { effect, rule };

@@ -3,7 +3,8 @@
 import type { Actions } from '../main/main';
 
 export type Effect = 'allow' | 'ask' | 'deny';
-export type Initiator = 'user' | 'bot' | 'routine';
+// routine-bot: a Bot doing work a routine handed it (nobody is watching either).
+export type Initiator = 'user' | 'bot' | 'routine' | 'routine-bot';
 
 export interface Memory {
   id: string;
