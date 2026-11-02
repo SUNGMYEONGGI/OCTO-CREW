@@ -50,6 +50,7 @@ assert.equal(gateway.decide(call, rules).effect, 'deny');
 assert.equal(gateway.decide({ ...call, args: { command: 'ls' } }, rules).effect, 'allow');
 const askBash = { Bash: 'ask' } as const;
 assert.equal(gateway.decide({ ...call, initiator: 'routine' as const }, [], askBash).effect, 'deny');
+assert.equal(gateway.decide({ ...call, initiator: 'routine-bot' as const }, [], askBash).effect, 'deny');
 assert.equal(gateway.decide(call, [{ id: 'r3', effect: 'allow', tool: '*', match: '(' }], askBash).effect, 'ask');
 assert.equal(gateway.decide(call, [{ id: 'r4', effect: 'allow', tool: '*', botId: 'other' }], askBash).effect, 'ask');
 assert.equal(gateway.maskSecrets('token=abcd1234', ['abcd1234']), 'token=••••');
@@ -214,6 +215,29 @@ assert.equal(gateway.sensitive({ name: 'Read', args: { file_path: '/Users/a/Libr
 assert.equal(gateway.sensitive({ name: 'Bash', args: { command: 'npm test && git status' } }), false);
 assert.equal(gateway.sensitive({ name: 'Write', args: { file_path: '/tmp/r.md', content: 'security findings: rotate ~/.ssh keys' } }), false);
 assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } }), false);
+
+// Relative and disguised paths from the Bot's workspace still count (#61, #64).
+{
+  const data = '/Users/a/Library/Application Support/PixelBot';
+  const w = { cwd: `${data}/workspaces/bot_1`, dataDir: data, home: '/Users/a' };
+  const yes = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), true, JSON.stringify(args));
+  const no = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), false, JSON.stringify(args));
+  yes('Bash', { command: 'cat ../../state.json' });
+  yes('Bash', { command: 'cd ../../codex && cat auth.json' });
+  yes('Read', { file_path: '../../state.json' });
+  yes('Read', { file_path: 'a/../../../state.json' });
+  yes('Read', { file_path: `${w.cwd}/../../state.json` });
+  yes('Write', { file_path: '../../bin/stt', content: 'x' });
+  yes('Bash', { command: 'cat ~/Library/Application\\ Support/PixelBot/state.json' });
+  yes('Bash', { command: 'cat ~/.ss?/id_rsa' });
+  yes('Bash', { command: 'cat $HOME/.ssh/id_rsa' });
+  yes('Read', { file_path: '/users/a/library/application support/pixelbot/STATE.json' });
+  no('Read', { file_path: '../bot_2/draft.md' }); // a teammate's workspace
+  no('Read', { file_path: 'notes/report.md' });
+  no('Write', { file_path: `${w.cwd}/out.md`, content: 'see ../../state.json' });
+  no('Bash', { command: 'ls -la && python3 build.py' });
+  no('Grep', { pattern: 'a..b', path: '.' });
+}
 
 // Message search: every word, newest first, no tool entries or hidden briefs.
 {
