@@ -51,9 +51,18 @@ const SENSITIVE = [
 // Where the Bot runs: its workspace sits inside the app's data folder, so a
 // relative path (../../state.json) reaches the app's own files.
 export interface Where { cwd: string; dataDir: string; home: string }
-const real = (p: string): string => {
-  try { return fs.realpathSync(p); } catch { return p; } // not there yet: judge the spelled path
-};
+// Real path of the closest existing parent plus the rest, lower-cased: the
+// default macOS volume ignores case, so State.JSON is state.json.
+function real(p: string): string {
+  let head = path.resolve(p), rest = '';
+  for (;;) {
+    try { return path.join(fs.realpathSync(head), rest).toLowerCase(); } catch {}
+    const up = path.dirname(head);
+    if (up === head) return path.resolve(p).toLowerCase();
+    rest = path.join(path.basename(head), rest);
+    head = up;
+  }
+}
 function sensitive(call: Call, where?: Where): boolean {
   if (call.name.startsWith('mcp__')) return false;
   // What a file tool writes is content, not a target: only its path counts.
@@ -61,21 +70,24 @@ function sensitive(call: Call, where?: Where): boolean {
   // Shell-escaped spaces (Application\ Support) count as spaces.
   let text = JSON.stringify(args).replace(/\\\//g, '/').replace(/\\\\ /g, ' ');
   if (where) {
+    const data = real(where.dataDir);
+    // Bots may read each other's workspaces (team members share files); the rest of the data folder is the app's.
+    const shared = path.join(data, 'workspaces');
     text = text.replace(/(^|[\s"'=:])(~|\$HOME|\$\{HOME\})(?=\/|[\s"']|$)/g, `$1${where.home}`);
     const paths = ['path', 'file_path', 'notebook_path'].map((k) => (args as Record<string, unknown>)[k]).filter((v): v is string => typeof v === 'string' && v !== '')
       .map((v) => real(path.resolve(where.cwd, v.replace(/^~(?=\/|$)/, where.home))));
     text += JSON.stringify(paths);
-    // The app's data folder (state.json, secrets.bin, codex/, bin/stt) outside this Bot's own workspace.
-    const inData = (p: string) => p === where.dataDir || p.startsWith(where.dataDir + path.sep);
-    const own = (p: string) => p === where.cwd || p.startsWith(where.cwd + path.sep);
-    if (paths.some((p) => inData(p) && !own(p))) return true;
-    if (text.split(where.cwd).join('').includes(where.dataDir)) return true;
-    // The workspace is inside the data folder, so any step up in a command or pattern leaves it.
-    if (Object.entries(args).some(([k, v]) => typeof v === 'string' && !/^(content|new_string|old_string|description|prompt)$/.test(k) && /(^|[\s"'=/:;|&(])\.\.(\/|[\s"';|&)]|$)/.test(v))) return true;
+    // The app's data folder (state.json, secrets.bin, codex/, bin/stt) outside the Bot workspaces.
+    const under = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep);
+    if (paths.some((p) => under(p, data) && !under(p, shared))) return true;
+    const lower = text.toLowerCase();
+    if ([data, where.dataDir.toLowerCase()].some((d) => lower.split(path.join(d, 'workspaces')).join('').includes(d))) return true;
+    // Paths are resolved above; in a command or pattern any step up leaves the workspace (it sits in the data folder).
+    if (Object.entries(args).some(([k, v]) => typeof v === 'string' && !/^(content|new_string|old_string|description|prompt|path|file_path|notebook_path)$/.test(k) && /(^|[\s"'=/:;|&(])\.\.(\/|[\s"';|&)]|$)/.test(v))) return true;
     // Globs that spell a hidden folder in the home directory (~/.ss?/id_*).
     if (text.includes(`${where.home}/.`) && new RegExp(`${where.home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.[^/\\s"]*[?*[]`).test(text)) return true;
   }
-  return SENSITIVE.some((re) => re.test(text));
+  return SENSITIVE.some((re) => new RegExp(re.source, 'i').test(text));
 }
 
 function globToRegExp(glob: string): RegExp {

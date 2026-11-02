@@ -231,6 +231,8 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   yes('Bash', { command: 'cat ~/Library/Application\\ Support/PixelBot/state.json' });
   yes('Bash', { command: 'cat ~/.ss?/id_rsa' });
   yes('Bash', { command: 'cat $HOME/.ssh/id_rsa' });
+  yes('Read', { file_path: '/users/a/library/application support/pixelbot/STATE.json' });
+  no('Read', { file_path: '../bot_2/draft.md' }); // a teammate's workspace
   no('Read', { file_path: 'notes/report.md' });
   no('Write', { file_path: `${w.cwd}/out.md`, content: 'see ../../state.json' });
   no('Bash', { command: 'ls -la && python3 build.py' });

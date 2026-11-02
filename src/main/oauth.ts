@@ -34,7 +34,9 @@ const HOSTS: Record<string, OauthConfig> = {
   'slidesmcp.googleapis.com': google('presentations'),
   'chatmcp.googleapis.com': google('chat.spaces.readonly', 'chat.memberships.readonly', 'chat.messages.readonly', 'chat.messages.create'),
 };
-const configFor = (url: string): OauthConfig | null => HOSTS[new URL(url).hostname] || null;
+const configFor = (url: string): OauthConfig | null => {
+  try { return HOSTS[new URL(url).hostname] || null; } catch { return null; } // e.g. an unfilled ${BASE}/mcp
+};
 
 // rec: the server's persisted { client, tokens, expiresAt }; save() persists it.
 // client: a pre-registered { client_id, client_secret } or null for registration.

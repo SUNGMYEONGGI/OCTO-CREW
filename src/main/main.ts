@@ -83,7 +83,7 @@ const runtime = {
 };
 const approvals = new Map<string, ApprovalDone>(); // approval id -> resolve
 // botId -> the one calendar reply the user okayed on a meeting card: that chat, that event, for 5 minutes.
-const grants = new Map<string, { convId: string; eventId?: string; until: number }>();
+const grants = new Map<string, { convId: string; eventId: string; until: number }>();
 
 // ---------- persistence & broadcast ----------
 
@@ -562,7 +562,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     const external = call.name.startsWith('mcp__') && !call.name.startsWith('mcp__characterbot__');
     const grant = grants.get(bot.id);
     if (effect === 'ask' && external && /calendar|event/i.test(call.name) && grant && grant.convId === conv.id && Date.now() < grant.until
-      && (!grant.eventId || JSON.stringify(call.args).includes(grant.eventId))) {
+      && JSON.stringify(call.args).includes(grant.eventId)) {
       grants.delete(bot.id);
       effect = 'allow';
     }
@@ -989,7 +989,7 @@ async function runRoutine(routine: Routine, conv: Conv, event: string | null = n
 async function installPlugin(dir: string): Promise<void> {
   const plugin = plugins.readPlugin(dir);
   if (state.plugins.some((p) => p.name === plugin.name)) throw new Error(`"${plugin.name}" 플러그인이 이미 설치되어 있습니다`);
-  const servers: ServerInput[] = Object.entries(plugin.mcpServers).map(([name, cfg]) => ({ name, ...cfg }));
+  const servers = serverList(plugin.mcpServers as Record<string, ServerInput>);
   // Declined: installed turned off, so the user can read it in 설정 first.
   const run = await confirmRun(servers, skillList(plugin.skills), true);
   const pluginId = store.id('plg');
@@ -1043,14 +1043,16 @@ async function confirmRun(servers: Partial<Pick<McpServer, 'name' | 'command' | 
     type: 'warning', buttons: ['취소', local.length ? '실행' : '추가'], defaultId: 0, cancelId: 0,
     message: local.length ? (local.length > 1 ? `MCP 서버 ${local.length}개를 이 Mac에서 실행할까요?` : `"${local[0].name}" MCP 서버를 이 Mac에서 실행할까요?`)
       : remote.length ? '저장된 시크릿을 이 서버로 보내도 될까요?' : '이 스킬들을 추가할까요?',
-    detail: `${lines.join('\n')}${extra}`.trim().slice(0, 6000) + '\n\n믿을 수 있는 출처만 허용하세요. 취소하면 꺼진 상태로 추가돼요.',
+    detail: `${lines.join('\n')}${extra}`.trim() + '\n\n믿을 수 있는 출처만 허용하세요. 취소하면 꺼진 상태로 추가돼요.',
   });
   return response === 1;
 }
-const RUN_FIELDS = ['command', 'args', 'env'] as const;
+const RUN_FIELDS = ['command', 'args', 'env', 'url', 'headers'] as const;
 
 // New servers and skills are granted to every bot; each bot can turn them off.
 type ServerInput = Partial<Omit<McpServer, 'id' | 'enabled' | 'source'>> & { serverUrl?: string };
+// Claude-style JSON may say serverUrl; checks and storage both see it as url.
+const serverList = (cfgs: Record<string, ServerInput>): ServerInput[] => Object.entries(cfgs).map(([name, cfg]) => ({ name, ...cfg, url: cfg.url || cfg.serverUrl }));
 function addServer(cfg: ServerInput, source = 'user', enabled = true): McpServer {
   const { name, command, args, env, headers, oauth: auth } = cfg;
   const url = cfg.url || cfg.serverUrl;
@@ -1128,7 +1130,8 @@ const actions = {
     if (msg.card?.type !== 'meeting') return;
     msg.card.answer = choice;
     if (choice === 'later' || !msg.botId) return;
-    grants.set(msg.botId, { convId, eventId: typeof msg.card.event_id === 'string' && msg.card.event_id ? msg.card.event_id : undefined, until: Date.now() + 5 * 60_000 });
+    // Without an event id there is nothing to bind the grant to: the reply asks as usual.
+    if (typeof msg.card.event_id === 'string' && msg.card.event_id) grants.set(msg.botId, { convId, eventId: msg.card.event_id, until: Date.now() + 5 * 60_000 });
     const title = msg.card.title;
     const verb = choice === 'accept' ? '수락' : '거절';
     const blocked = state.settings.blockAccountWrites !== false;
@@ -1446,7 +1449,7 @@ const actions = {
   // Accepts Claude-desktop style `{ "mcpServers": { name: {...} } }` JSON.
   async addMcpJson(text: string): Promise<boolean> {
     const parsed = JSON.parse(text);
-    const servers = Object.entries((parsed.mcpServers || parsed) as Record<string, ServerInput>).map(([name, cfg]) => ({ name, ...cfg }));
+    const servers = serverList((parsed.mcpServers || parsed) as Record<string, ServerInput>);
     const run = await confirmRun(servers, '', true);
     for (const cfg of servers) addServer(cfg, 'user', run || !needsOk(cfg));
     syncMcp();
@@ -1462,7 +1465,7 @@ const actions = {
     const { id: _, source: __, ...rest } = patch;
     const next = { ...server, ...rest };
     const changesRun = RUN_FIELDS.some((k) => k in rest && JSON.stringify(rest[k]) !== JSON.stringify(server[k]));
-    if (next.enabled && (changesRun || !server.enabled) && !(await confirmRun([next]))) return;
+    if (next.enabled && (changesRun || !server.enabled) && !(await confirmRun([next], '', true))) return;
     Object.assign(server, rest);
     syncMcp();
   },
