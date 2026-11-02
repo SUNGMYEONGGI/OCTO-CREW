@@ -453,7 +453,7 @@ const VIEWS: Record<Tab, () => Child[]> = {
       h('table', { class: 'audit' },
         h('tr', {}, h('th', {}, '시각'), h('th', {}, 'Bot'), h('th', {}, '작업'), h('th', {}, '결과'), h('th', {}, '입력')),
         [...S.audit].reverse().slice(0, 200).map((a) => h('tr', {},
-          h('td', {}, new Date(a.ts).toLocaleString()), h('td', {}, bot(a.botId), a.initiator === 'routine' ? ' ⏰' : ''), h('td', {}, a.tool.replace(/^mcp__characterbot__/, '')),
+          h('td', {}, new Date(a.ts).toLocaleString()), h('td', {}, bot(a.botId), a.initiator === 'routine' || a.initiator === 'routine-bot' ? ' ⏰' : ''), h('td', {}, a.tool.replace(/^mcp__characterbot__/, '')),
           h('td', {}, h('span', { class: `badge ${a.outcome}` }, a.outcome)), h('td', { class: 'args' }, JSON.stringify(a.args).slice(0, 300))))),
     ];
   },
