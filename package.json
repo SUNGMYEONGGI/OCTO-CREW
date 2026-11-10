@@ -1,7 +1,7 @@
 {
   "name": "characterbot",
   "productName": "OCTO CREW",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Desktop AI bot team on your own Claude and ChatGPT subscriptions",
   "author": "SUNGMYEONGGI",
   "private": true,
