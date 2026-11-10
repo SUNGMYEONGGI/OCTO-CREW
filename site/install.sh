@@ -3,7 +3,8 @@
 # curl downloads carry no quarantine flag, so Gatekeeper doesn't block the unsigned build.
 set -eu
 [ "$(uname -s)" = Darwin ] || { echo "OCTO CREW runs on macOS only." >&2; exit 1; }
-[ "$(uname -m)" = arm64 ] || { echo "OCTO CREW needs a Mac with Apple silicon." >&2; exit 1; }
+# uname -m says x86_64 in a Rosetta terminal; ask the hardware.
+[ "$(sysctl -in hw.optional.arm64)" = 1 ] || { echo "OCTO CREW needs a Mac with Apple silicon." >&2; exit 1; }
 
 LATEST=https://github.com/SUNGMYEONGGI/PixelBot/releases/latest/download
 TMP=$(mktemp -d)

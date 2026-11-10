@@ -313,7 +313,7 @@ function teamLine(m: Message): HTMLElement | null {
   const short = (m.name || '').replace(/^mcp__characterbot__/, '');
   if (!m.content || m.content.startsWith('Error')) return null;
   const a = (m.args || {}) as Record<string, unknown>;
-  const named = (n: unknown) => S.bots.find((b) => b.name.toLowerCase() === String(n).replace(/^@/, '').toLowerCase());
+  const named = (n: unknown) => S.bots.find((b) => b.name.toLowerCase() === String(n).trim().replace(/^@/, '').toLowerCase());
   const stack = (bots: Bot[]) => h('span', { class: 'av-stack' }, ...bots.slice(0, 4).map((b) => avatar(b, 20)));
   if (short === 'create_bot') {
     const bot = named(a.name);
@@ -327,6 +327,7 @@ function teamLine(m: Message): HTMLElement | null {
     const names = short === 'message_bot' ? [String(a.bot_name)] : ((a.bot_names as string[]) || []);
     const bots = names.map(named).filter((b): b is Bot => Boolean(b));
     const open = () => openExchange(exchangesOf(m, names), true);
+    if (!bots.length) return null;
     return bots.length === 1
       ? h('button', { class: 'team-line', title: '주고받은 메시지 열기', onclick: open }, '메시지 보냄', avatar(bots[0], 20), h('b', null, bots[0].name))
       : h('button', { class: 'team-line', title: '주고받은 메시지 열기', onclick: open }, '메시지 보냄', stack(bots), `Bot ${bots.length}개`);
@@ -428,7 +429,7 @@ function exchangeRun(c: Conv, firstId: string, one = false): Message[] {
 // with the same text from this bot.
 function exchangesOf(m: Message, names: string[]): [string, string][] {
   return names.flatMap((n): [string, string][] => {
-    const bot = S.bots.find((b) => b.name.toLowerCase() === n.replace(/^@/, '').toLowerCase());
+    const bot = S.bots.find((b) => b.name.toLowerCase() === n.trim().replace(/^@/, '').toLowerCase());
     const dm = bot && S.convs.find((x) => x.kind === 'dm' && x.botIds[0] === bot.id);
     const first = dm?.messages.find((x) => x.viaBotId === m.botId && x.role === 'user' && x.ts >= m.ts - 5000 && x.content === (m.args as { message?: string })?.message);
     return dm && first ? [[dm.id, first.id]] : [];
@@ -1108,8 +1109,10 @@ function computerTab(c: Conv, bot: Bot): Child[] {
       steps.length ? h('div', { class: 'list activity sub' }, steps.map(entry)) : null,
       h('pre', {}, a.output));
   };
-  const runningSubs = working.map((p) => h('details', { open: true },
-    h('summary', { class: 'row small' }, h('span', { class: 'badge running' }, '실행 중'), h('span', { class: 'grow ellipsis' }, '하위 에이전트'), h('span', { class: 'muted' }, `${kids.get(p)?.length}단계`)),
+  // Steps whose Task never finished (the run stopped or failed) show as stopped.
+  const live = Object.values(S.runtime.active || {}).some((r) => r.botId === bot.id && (r.subagents || 0) > 0);
+  const runningSubs = working.map((p) => h('details', { open: live },
+    h('summary', { class: 'row small' }, live ? h('span', { class: 'badge running' }, '실행 중') : h('span', { class: 'badge' }, '중단됨'), h('span', { class: 'grow ellipsis' }, '하위 에이전트'), h('span', { class: 'muted' }, `${kids.get(p)?.length}단계`)),
     h('div', { class: 'list activity sub' }, (kids.get(p) || []).map(entry))));
   return [
     screen,
@@ -1135,7 +1138,20 @@ async function renderPanel(force = false) {
   document.body.classList.toggle('panel-closed', !ui.panelOpen);
   if (!ui.panelOpen) return;
   const c = currentConv();
-  const thread = (ui.exchange && exchangeView()) || (ui.threadId && threadView(c));
+  if (ui.exchange) {
+    // Rebuilt on each broadcast: skip while the user is typing or picking, keep the scroll.
+    if (!force && editing(el)) return;
+    const top = el.querySelector('.thread-list')?.scrollTop;
+    const view = exchangeView();
+    if (view) {
+      fill(el, view);
+      const list = view.querySelector('.thread-list');
+      if (list && top != null) list.scrollTop = top;
+      renderDiagrams(view);
+      return;
+    }
+  }
+  const thread = ui.threadId && threadView(c);
   if (thread) {
     if (el.firstChild !== thread) fill(el, thread);
     return;
@@ -1210,11 +1226,10 @@ function pixelGrid(state: Look, redraw: () => void): { el: HTMLElement; draw: ()
   };
   const draw = () => fill(grid, ...(state.pixels || shapeMask(state.shape)).split('').map((bit, i) => h('button', {
     class: bit === '1' ? 'on' : '', style: bit === '1' ? `background:${state.color}` : '', 'aria-label': `${(i >> 4) + 1}행 ${(i % 16) + 1}열`,
-    onmousedown: (e) => { e.preventDefault(); paint = bit === '1' ? '0' : '1'; set(i); },
+    onmousedown: (e) => { e.preventDefault(); paint = bit === '1' ? '0' : '1'; document.addEventListener('mouseup', () => { paint = null; }, { once: true }); set(i); },
     onmouseenter: () => set(i),
   })));
   grid.addEventListener('mouseleave', () => { paint = null; });
-  document.addEventListener('mouseup', () => { paint = null; });
   draw();
   return { el: grid, draw };
 }

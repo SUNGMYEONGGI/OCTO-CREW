@@ -122,6 +122,8 @@ const CREW: Crew[] = [
     eyes: [[42, 50], [58, 50]] },
 ];
 export const SHAPE_COUNT = CREW.length;
+// Older saves have shapes 4–13; they fold onto the four.
+const crew = (i: number): Crew => CREW[Number.isInteger(i) && i >= 0 ? i % SHAPE_COUNT : 0];
 export const CREW_COLORS = ['#8766e7', '#59b1ed', '#f6ac80', '#b4d85f'];
 
 // Mixes a #rrggbb color toward black (t < 0) or white (t > 0).
@@ -155,7 +157,7 @@ function drawn(pixels: string): Uint8Array {
 // A character's body as Bot.pixels, the pixel editor's starting point.
 export function shapeMask(i: number): string {
   const ctx = document.createElement('canvas').getContext('2d');
-  const body = new Path2D(CREW[Number.isInteger(i) && i >= 0 && i < SHAPE_COUNT ? i : 0].d);
+  const body = new Path2D(crew(i).d);
   let out = '';
   for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) out += ctx?.isPointInPath(body, (c + 0.5) * PX, (r + 0.5) * PX) ? '1' : '0';
   return out;
@@ -191,7 +193,7 @@ export function avatarSvg(shape = 0, color = '#999', size = 40, { sleeping = fal
     const body = runs(drawn(pixels), ['', color, tint(color, -0.32), tint(color, 0.28)]);
     return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" overflow="visible"><g class="av-body" shape-rendering="crispEdges">${body}</g>${eyesOf([[59, 37], [72, 33]], sleeping)}</svg>`;
   }
-  const c = CREW[Number.isInteger(shape) && shape >= 0 ? shape % SHAPE_COUNT : 0];
+  const c = crew(shape);
   const id = `avg${++gradId}`;
   // Matte clay: the flat color, a soft light from the upper left, a shade toward the lower right.
   const defs = `<defs><radialGradient id="${id}l" cx=".32" cy=".22" r=".7"><stop offset="0" stop-color="#fff" stop-opacity=".34"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>`

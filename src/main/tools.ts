@@ -165,7 +165,7 @@ function specs(ctx: ToolCtx): Spec[] {
       name: z.string().describe('짧고 고유한 이름'), role: z.string().describe('한 줄 역할 설명 (사이드바 라벨)'),
       instructions: z.string().optional().describe('이 Bot의 성격, 관점, 일하는 방식 (시스템 지침)'), model: z.string().optional(),
       color: z.string().optional().describe('얼굴 색 (#rrggbb). 여러 Bot을 만들 때는 서로 다르게'),
-      shape: z.number().int().min(0).max(13).optional().describe('얼굴 모양 번호 0~13. 여러 Bot을 만들 때는 서로 다르게'),
+      shape: z.number().int().min(0).max(3).optional().describe('캐릭터 번호: 0 Octo(문어), 1 Drop(물방울), 2 Fold(접힌 종이), 3 Gem(마름모). 여러 Bot을 만들 때는 서로 다르게'),
       greeting: z.string().max(500).optional().describe('새 Bot에게 전할 짧은 메모. 새 Bot이 이 메모를 보고 사용자에게 먼저 인사합니다'),
     }, async (args) => {
       const bot = ctx.createBot(args);
