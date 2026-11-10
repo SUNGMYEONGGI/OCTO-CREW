@@ -1,5 +1,5 @@
 {
-  "name": "characterbot",
+  "name": "octo-crew",
   "productName": "OCTO CREW",
   "version": "0.4.0",
   "description": "Desktop AI bot team on your own Claude and ChatGPT subscriptions",
@@ -54,7 +54,7 @@
     "publish": {
       "provider": "github",
       "owner": "SUNGMYEONGGI",
-      "repo": "PixelBot"
+      "repo": "OCTO-CREW"
     },
     "electronFuses": {
       "runAsNode": false,
