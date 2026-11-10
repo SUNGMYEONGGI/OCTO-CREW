@@ -1,6 +1,6 @@
 name: Pages
 
-# Deploys the OCTO CREW landing page in site/ to https://sungmyeonggi.github.io/PixelBot/.
+# Deploys the OCTO CREW landing page in site/ to https://sungmyeonggi.github.io/OCTO-CREW/.
 # The page reads the latest release from the GitHub API, so new releases need no redeploy.
 on:
   push:

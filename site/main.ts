@@ -1,7 +1,7 @@
 // The landing page reuses the app's own avatar renderer (and its pointer-following eyes).
 import { avatarSvg } from '../src/renderer/ui';
 
-const REPO = 'SUNGMYEONGGI/PixelBot';
+const REPO = 'SUNGMYEONGGI/OCTO-CREW';
 // Releases from before the rename only carry PixelBot-arm64.dmg (later ones carry both).
 const DMGS = ['OCTO-CREW-arm64.dmg', 'PixelBot-arm64.dmg'];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;

@@ -1,7 +1,7 @@
 // "Is there a newer OCTO CREW?" Reads the latest GitHub release; nothing is
 // downloaded or installed (the build is unsigned, so the user installs by hand).
 
-export const RELEASES = 'https://api.github.com/repos/SUNGMYEONGGI/PixelBot/releases/latest';
+export const RELEASES = 'https://api.github.com/repos/SUNGMYEONGGI/OCTO-CREW/releases/latest';
 
 const parts = (v: string) => v.replace(/^v/, '').split(/[.-]/).slice(0, 3).map((n) => parseInt(n, 10) || 0);
 
@@ -24,6 +24,6 @@ export async function check(current: string, get: typeof fetch = fetch): Promise
   const rel = await res.json();
   const version = String(rel.tag_name || '').replace(/^v/, '');
   // Only ever link to this repo's release pages.
-  const url = /^https:\/\/github\.com\/SUNGMYEONGGI\/PixelBot\/releases\//.test(rel.html_url) ? rel.html_url : 'https://github.com/SUNGMYEONGGI/PixelBot/releases/latest';
+  const url = /^https:\/\/github\.com\/SUNGMYEONGGI\/OCTO-CREW\/releases\//.test(rel.html_url) ? rel.html_url : 'https://github.com/SUNGMYEONGGI/OCTO-CREW/releases/latest';
   return version && newer(version, current) ? { version, url } : null;
 }

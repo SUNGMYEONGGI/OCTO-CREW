@@ -279,7 +279,7 @@ function serverRow(s: McpServer, inPlugin = false) {
   const fix = s.enabled && (st.status === 'auth' || st.status === 'error');
   const del = inPlugin ? null : h('button', {
     class: armed === s.id ? 'btn danger small' : 'x', title: '삭제',
-    onclick: () => { if (armed === s.id) { armed = ''; act('deleteMcpServer', s.id); } else { armed = s.id; draw(); setTimeout(() => { if (armed === s.id) { armed = ''; draw(); } }, 3000); } },
+    onclick: () => confirmDelete(s.id, () => act('deleteMcpServer', s.id)),
   }, armed === s.id ? '삭제할까요?' : '×');
   return h('div', { class: `row app-row${s.enabled ? '' : ' off'}` }, serverTile(s, 36),
     h('div', { class: 'grow' },
@@ -287,8 +287,16 @@ function serverRow(s: McpServer, inPlugin = false) {
       h('div', { class: `small ellipsis ${fix ? 'attn-text' : 'muted'}` }, s.enabled ? statusText(st) : statusText({ status: 'off', tools: [] }))),
     fix ? h('button', { class: 'add-btn attn', onclick: () => connect(s.id, catalogOf(s)) }, st.status === 'auth' ? '로그인' : '다시 연결')
       : S.oauthConnected.includes(s.id) ? h('button', { class: 'add-btn', onclick: () => act('disconnectMcp', s.id) }, '로그아웃') : null,
-    h('input', { type: 'checkbox', class: 'toggle', title: s.enabled ? '끄기' : '켜기', checked: s.enabled, onchange: (e) => act('updateMcpServer', s.id, { enabled: e.target.checked }) }),
+    h('input', { type: 'checkbox', class: 'toggle', title: s.enabled ? '끄기' : '켜기', checked: s.enabled, onchange: (e) => void Promise.resolve(act('updateMcpServer', s.id, { enabled: e.target.checked })).finally(draw) }),
     del);
+}
+
+// Delete takes a second click within 3 seconds.
+function confirmDelete(id: string, run: () => unknown) {
+  if (armed === id) { armed = ''; run(); return; }
+  armed = id;
+  draw();
+  setTimeout(() => { if (armed === id) { armed = ''; draw(); } }, 3000);
 }
 
 function drawConnected(head: Element, body: Element) {
@@ -311,8 +319,8 @@ function drawConnected(head: Element, body: Element) {
         h('div', { class: 'row' },
           h('div', { class: 'tile logo', style: 'width:36px;height:36px;border-radius:10px' }, icon('folder', 18)),
           h('div', { class: 'grow' }, h('b', {}, p.name), h('div', { class: 'muted small ellipsis' }, p.description || p.path)),
-          h('input', { type: 'checkbox', class: 'toggle', checked: p.enabled, onchange: (e) => act('setPluginEnabled', p.id, e.target.checked) }),
-          h('button', { class: armed === p.id ? 'btn danger small' : 'x', title: '삭제', onclick: () => { if (armed === p.id) { armed = ''; act('removePlugin', p.id); } else { armed = p.id; draw(); } } }, armed === p.id ? '삭제할까요?' : '×')),
+          h('input', { type: 'checkbox', class: 'toggle', checked: p.enabled, onchange: (e) => void Promise.resolve(act('setPluginEnabled', p.id, e.target.checked)).finally(draw) }),
+          h('button', { class: armed === p.id ? 'btn danger small' : 'x', title: '삭제', onclick: () => confirmDelete(p.id, () => act('removePlugin', p.id)) }, armed === p.id ? '삭제할까요?' : '×')),
         servers.length ? h('div', { class: 'plugin-servers' }, servers.map((s) => serverRow(s, true))) : null);
     }))] : null,
   );
