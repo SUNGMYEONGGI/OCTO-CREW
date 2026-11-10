@@ -1,6 +1,6 @@
 // Settings modal: a left nav and grouped cards.
 import type { Actions } from '../main/main';
-import type { Broadcast, Effect, Provider, Settings, Skill } from '../shared/types';
+import type { Broadcast, Effect, Provider, Settings, Skill, Usage } from '../shared/types';
 import { h, fill, $, act, icon, editing, openModal, closeModal, userAvatar, toggle, avatar, popover, toast, modelName, modelOptions, type Child } from './ui';
 import { LOGOS } from './logos';
 
@@ -85,6 +85,17 @@ const select = <T extends string>(value: T, options: [T, string][], onchange: (v
   options.map(([v, l]) => h('option', { value: v, selected: value === v ? true : null }, l)));
 const set = (patch: Partial<Settings>) => act('updateSettings', patch);
 const link = (href: string, label: string) => h('a', { class: 'btn soft', href, target: '_blank' }, label, icon('external', 14));
+// Which bot spent what, one row per bot and model, busiest first.
+function perBot(u: Usage, tokens: (n: number) => string): Child {
+  const rows = Object.entries(u.bots || {}).flatMap(([botId, byModel]) => Object.entries(byModel).map(([model, t]) => ({ bot: S.bots.find((b) => b.id === botId), model, t })))
+    .filter((r) => r.bot).sort((a, b) => b.t.inputTokens + b.t.outputTokens - (a.t.inputTokens + a.t.outputTokens));
+  if (!rows.length) return null;
+  return h('div', { class: 'group ucard' }, h('div', { class: 'uhead' }, 'Bot별 사용량'),
+    rows.map(({ bot, model, t }) => h('div', { class: 'row', style: 'padding:6px 2px' }, avatar(bot, 22),
+      h('span', { class: 'grow' }, bot?.name, h('span', { class: 'muted' }, ` · ${model === 'default' ? '기본 모델' : modelName(S.models, model)}`)),
+      h('span', { class: 'muted small' }, `턴 ${t.turns.toLocaleString()} · 입력 ${tokens(t.inputTokens)} / 출력 ${tokens(t.outputTokens)}`))));
+}
+
 const cap = (s: string | null | undefined) => (s ? s[0].toUpperCase() + s.slice(1) : '');
 
 const TIMEZONES = ['auto', 'Asia/Seoul', 'Asia/Tokyo', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'UTC'];
@@ -314,7 +325,9 @@ const VIEWS: Record<Tab, () => Child[]> = {
       h('div', { class: 'group' },
         row('하드웨어 가속 사용', toggle(S.settings.hardwareAcceleration, (v) => { set({ hardwareAcceleration: v }); toast('앱을 다시 시작하면 적용돼요'); })),
         row('알림', toggle(S.settings.notifications, (v) => set({ notifications: v })), '앱이 뒤에 있을 때 Bot의 답장을 알림으로 받아요.'),
-        row('마이크', micSelect(), '음성 메모와 음성 채팅에 쓸 마이크예요.')),
+        row('마이크', micSelect(), '음성 메모와 음성 채팅에 쓸 마이크예요.'),
+        row('새 버전 알림', toggle(S.settings.updateCheck, (v) => set({ updateCheck: v })), '앱을 열 때와 하루에 한 번 GitHub에서 새 버전이 나왔는지 확인해요. 자동으로 설치하지는 않아요.'),
+        S.appUpdate ? row(`새 버전 ${S.appUpdate.version}`, link(S.appUpdate.url, '설치 방법'), `지금 쓰는 버전은 ${host?.version || ''}이에요.`) : null),
 
       h('h3', {}, 'Bot'),
       h('div', { class: 'group' },
@@ -340,7 +353,7 @@ const VIEWS: Record<Tab, () => Child[]> = {
       h('h3', {}, '내 컴퓨터'),
       h('div', { class: 'group' },
         row('이 컴퓨터에서 실행', select(S.settings.computerAccess, [['allow', '항상 허용'], ['ask', '먼저 묻기'], ['deny', '허용 안 함']], (v) => set({ computerAccess: v })),
-          'PixelBot이 내 컴퓨터에서 파일을 열고 작업을 실행하도록 해요. 자동 검토는 여전히 먼저 확인해요.'),
+          'OCTO CREW가 내 컴퓨터에서 파일을 열고 작업을 실행하도록 해요. 자동 검토는 여전히 먼저 확인해요.'),
         row('내 계정 앱에 쓰기 차단', toggle(S.settings.blockAccountWrites !== false, (v) => set({ blockAccountWrites: v })),
           'Slack, Gmail, 캘린더처럼 내 계정과 연동된 앱에는 읽기만 해요. 보내기·만들기·삭제는 승인 카드 없이 항상 막아요.')),
       ...secretsSection(),
@@ -379,6 +392,7 @@ const VIEWS: Record<Tab, () => Child[]> = {
         usage ? 'Claude 구독으로 로그인되어 있지 않아요' : '불러오는 중…'),
       S.settings.chatgpt ? card(icon('openai', 18), 'Codex', usage?.chatgpt?.plan || S.chatgpt?.plan, 'https://chatgpt.com/codex/settings/usage', gpt,
         usage ? 'ChatGPT 사용량을 불러오지 못했어요' : '불러오는 중…') : null,
+      perBot(u, tokens),
       h('div', { class: 'group-note row' }, h('span', { class: 'grow' }, `이 앱 · Bot 턴 ${u.turns.toLocaleString()} · 토큰 입력 ${tokens(u.inputTokens)} / 출력 ${tokens(u.outputTokens)}`),
         h('button', { class: 'btn ghost', onclick: () => { usage = null; draw(true); } }, icon('update', 14), ' 새로고침')),
     ];
@@ -388,7 +402,7 @@ const VIEWS: Record<Tab, () => Child[]> = {
     const status = latestSdk === null ? null : latestSdk === host?.sdk ? '최신 버전이에요' : `${latestSdk} 사용 가능 · npm update @anthropic-ai/claude-agent-sdk`;
     return [
       h('div', { class: 'group', style: 'margin-top:18px' },
-        row('PixelBot', h('span', { class: 'muted' }, host?.version || '')),
+        row('OCTO CREW', h('span', { class: 'muted' }, host?.version || '')),
         row('Claude Agent SDK', h('button', { class: 'btn soft', onclick: async () => { latestSdk = (await act('checkUpdates')) ?? null; draw(true); } }, '업데이트 확인'), `${host?.sdk || ''}${status ? ` · ${status}` : ''}`),
         row('Electron', h('span', { class: 'muted' }, host?.electron || ''))),
     ];

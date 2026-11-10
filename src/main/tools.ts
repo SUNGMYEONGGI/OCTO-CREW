@@ -14,6 +14,8 @@ import type { Bot, Routine, State, Task } from '../shared/types';
 import type { AgentSdk } from './agent';
 import type { ScheduleInput } from './routines';
 
+export interface NewBot { name: string; role: string; instructions?: string; model?: string; color?: string; shape?: number; greeting?: string }
+
 const within = (root: string, p: string) => p === root || p.startsWith(root + path.sep);
 const realpath = (p: string) => {
   try {
@@ -80,16 +82,17 @@ const text = (t: string): Result => ({ content: [{ type: 'text', text: t }] });
 export interface ToolCtx {
   bot: Bot;
   state: State;
-  messageBot: (name: string, message: string) => Promise<string>;
+  messageBot: (name: string, message: string, files?: string[]) => Promise<string>;
+  messageBots: (names: string[], message: string, files?: string[]) => Promise<string>;
   createRoutine: (args: ScheduleInput & { prompt: string }) => Routine;
   webhookUrl: (key: string) => string;
   cancelRoutine: (id: string) => void;
   models: () => { value: string; name: string }[];
-  createBot: (args: { name: string; role: string; instructions?: string; model?: string }) => Bot;
+  createBot: (args: NewBot) => Bot;
   createTeam: (name: string, botNames: string[]) => string;
   updateBot: (args: { name: string; role?: string; instructions?: string; model?: string }) => Bot;
   addToTeam: (team: string, botNames: string[]) => string;
-  messageTeam: (team: string, message: string, mention?: string[]) => Promise<string>;
+  messageTeam: (team: string, message: string, mention?: string[], files?: string[]) => Promise<string>;
   setStatus: (subject: string, verb: string) => void;
   setTasks: (goal: string, items: Task[]) => void;
 }
@@ -111,6 +114,8 @@ function spec<S extends z.ZodRawShape>(name: string, description: string, shape:
   };
   return { name, description, shape, handler };
 }
+
+const attachments = z.array(z.string()).max(5).optional().describe('넘길 파일들: 당신 작업 폴더 안의 경로 (각 20MB까지). 받는 Bot의 작업 폴더 received/에 복사됩니다');
 
 function specs(ctx: ToolCtx): Spec[] {
   return [
@@ -143,8 +148,11 @@ function specs(ctx: ToolCtx): Spec[] {
       return `루틴을 만들었습니다 (${r.id})${r.schedule.type === 'webhook' ? `. 웹훅 주소: ${ctx.webhookUrl(r.schedule.key)} (이 컴퓨터에서만 POST로 호출 가능)` : ''}`;
     }),
     spec('message_bot', '다른 Bot에게 DM을 보내 일을 맡기거나 묻고, 그 Bot의 답을 받아옵니다.', {
-      bot_name: z.string(), message: z.string(),
-    }, async ({ bot_name: name, message }) => ctx.messageBot(name, message)),
+      bot_name: z.string(), message: z.string(), attachments,
+    }, async ({ bot_name: name, message, attachments: files }) => ctx.messageBot(name, message, files)),
+    spec('message_bots', '여러 Bot에게 같은 일을 동시에 DM으로 맡기고, 모두의 답을 한꺼번에 받아옵니다. 리뷰어 여럿에게 같은 원고를 보낼 때처럼 서로의 답을 볼 필요가 없을 때 쓰세요.', {
+      bot_names: z.array(z.string()).min(2).max(10), message: z.string(), attachments,
+    }, async ({ bot_names: names, message, attachments: files }) => ctx.messageBots(names, message, files)),
     spec('set_status', '채팅 아래에 지금 하는 일을 짧게 보여줍니다 (예: subject "학회 정보", verb "검색 중"). 새 단계를 시작할 때마다 먼저 호출하세요. 사용자에게는 이 표시만 보이고 결과는 따로 알리지 않습니다.', {
       subject: z.string().describe('무엇을 (명사구, 12자 이내)'), verb: z.string().describe('하는 중 (예: 검색 중, 정리 중, 구성 중)'),
     }, async ({ subject, verb }) => {
@@ -156,6 +164,9 @@ function specs(ctx: ToolCtx): Spec[] {
     spec('create_bot', '새 Bot(에이전트)을 만듭니다. 이름, 역할, 성격·관점을 담은 지침을 정하고, 필요하면 list_models의 value로 모델을 지정하세요. 사용자가 팀이나 Bot을 만들어 달라고 하면 이 도구로 직접 만드세요.', {
       name: z.string().describe('짧고 고유한 이름'), role: z.string().describe('한 줄 역할 설명 (사이드바 라벨)'),
       instructions: z.string().optional().describe('이 Bot의 성격, 관점, 일하는 방식 (시스템 지침)'), model: z.string().optional(),
+      color: z.string().optional().describe('얼굴 색 (#rrggbb). 여러 Bot을 만들 때는 서로 다르게'),
+      shape: z.number().int().min(0).max(3).optional().describe('캐릭터 번호: 0 Octo(문어), 1 Drop(물방울), 2 Fold(접힌 종이), 3 Gem(마름모). 여러 Bot을 만들 때는 서로 다르게'),
+      greeting: z.string().max(500).optional().describe('새 Bot에게 전할 짧은 메모. 새 Bot이 이 메모를 보고 사용자에게 먼저 인사합니다'),
     }, async (args) => {
       const bot = ctx.createBot(args);
       return `${bot.name} Bot을 만들었어요${bot.model ? ` (모델 ${bot.model})` : ''}`;
@@ -170,9 +181,9 @@ function specs(ctx: ToolCtx): Spec[] {
       name: z.string(), bots: z.array(z.string()).describe('팀에 넣을 Bot 이름들'),
     }, async ({ name, bots }) => ctx.createTeam(name, bots)),
     spec('add_to_team', '기존 팀에 Bot을 더 넣습니다.', { team: z.string(), bots: z.array(z.string()) }, async ({ team, bots }) => ctx.addToTeam(team, bots)),
-    spec('message_team', '팀(그룹 채팅)에 메시지를 올리고 팀원들의 답을 받아옵니다. mention에 이름을 주면 그 Bot들만, 비우면 팀원 모두가 차례로 답합니다. 파일을 넘길 때는 작업 폴더 경로를 메시지에 적으세요.', {
-      team: z.string(), message: z.string(), mention: z.array(z.string()).optional(),
-    }, async ({ team, message, mention }) => ctx.messageTeam(team, message, mention)),
+    spec('message_team', '팀(그룹 채팅)에 메시지를 올리고 팀원들의 답을 받아옵니다. mention에 이름을 주면 그 Bot들만, 비우면 팀원 모두가 동시에(최대 3명씩) 답합니다. 파일은 attachments로 넘기세요.', {
+      team: z.string(), message: z.string(), mention: z.array(z.string()).optional(), attachments,
+    }, async ({ team, message, mention, attachments: files }) => ctx.messageTeam(team, message, mention, files)),
     spec('request_meeting_approval', '사용자가 요청하지 않은 회의 초대를 발견하면 참석 여부를 묻는 회의 카드를 보여줍니다. 호출한 뒤에는 바로 턴을 끝내고 사용자의 결정을 기다리세요. 수락·거절하면 캘린더에 응답할 권한이 한 번 주어집니다.', {
       title: z.string(), start: z.string().describe('시작 시각 (예: 10월 24일 (금) 오후 3:00)'), end: z.string().optional(),
       organizer: z.string().optional(), location: z.string().optional(), event_id: z.string().optional(),

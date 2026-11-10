@@ -101,90 +101,30 @@ export function icon(name: string, size = 18): HTMLElement {
   });
 }
 
-// ---------- bot avatars: pixel sprites of procedural shapes with two eyes ----------
+// ---------- bot avatars: the OCTO CREW characters (soft matte bodies, two dark eyes) ----------
 
-// r(θ) = 1 + a·cos(n·θ + phase), sampled and scaled to fit a 100×100 box.
-type Pt = [number, number];
-function polar(n: number, a: number, phase = 0, squash = 1): Pt[] {
-  const pts: Pt[] = [];
-  for (let i = 0; i < 96; i++) {
-    const t = (i / 96) * Math.PI * 2;
-    const r = 1 + a * Math.cos(n * t + phase);
-    pts.push([Math.cos(t) * r, Math.sin(t) * r * squash]);
-  }
-  return pts;
-}
-
-function superellipse(rx: number, ry: number, p: number): Pt[] {
-  const pts: Pt[] = [];
-  for (let i = 0; i < 96; i++) {
-    const t = (i / 96) * Math.PI * 2;
-    const c = Math.cos(t);
-    const s = Math.sin(t);
-    pts.push([Math.sign(c) * Math.abs(c) ** (2 / p) * rx, Math.sign(s) * Math.abs(s) ** (2 / p) * ry]);
-  }
-  return pts;
-}
-
-function egg(): Pt[] {
-  const pts: Pt[] = [];
-  for (let i = 0; i < 96; i++) {
-    const t = (i / 96) * Math.PI * 2;
-    pts.push([Math.cos(t) * (1 + 0.1 * Math.sin(t)) * 0.9, Math.sin(t)]);
-  }
-  return pts;
-}
-
-const SHAPE_POINTS = [
-  () => polar(0, 0),
-  () => superellipse(1, 1, 4),
-  () => polar(4, 0.16, Math.PI),
-  () => polar(5, 0.12, Math.PI / 2),
-  () => polar(6, 0.17, Math.PI / 2),
-  () => polar(3, 0.16, Math.PI / 2),
-  () => polar(7, 0.07),
-  () => polar(9, 0.05),
-  () => polar(6, 0.06),
-  () => superellipse(1, 0.78, 3),
-  egg,
-  () => polar(4, 0.13),
-  () => polar(2, 0.1, Math.PI / 2),
-  () => polar(0, 0, 0, 0.92), // fruit: a round body plus a leaf (drawn separately)
+// Octo (team lead), Drop, Fold and Gem: one outline each, so they read apart at
+// 24 px without color. Paths are in a 100×100 box; eyes are [cx, cy] pairs.
+type Crew = { d: string; eyes: [number, number][]; extra?: (color: string) => string };
+const CREW: Crew[] = [
+  { // Octo: a round dome with three short tentacles
+    d: 'M11 55C11 27 29 10 50 10S89 27 89 55C89 61 91 65 93 69C97 80 92 90 81 90C73 90 68 85 66 80C64 88 58 92 50 92S36 88 34 80C32 85 27 90 19 90C8 90 3 80 7 69C9 65 11 61 11 55Z',
+    eyes: [[40, 48], [60, 48]] },
+  { // Drop: an uneven drop, pointed at the upper right
+    d: 'M70 9C76 5 81 8 80 16C79 24 82 32 86 42C92 56 92 72 84 82C76 91 64 94 50 94C29 94 13 82 13 63C13 44 30 31 47 22C57 16 64 13 70 9Z',
+    eyes: [[43, 60], [60, 60]] },
+  { // Fold: a rounded page with its upper right corner folded
+    d: 'M30 13H63L87 37V71C87 81 80 88 70 88H30C20 88 13 81 13 71V30C13 20 20 13 30 13Z',
+    eyes: [[41, 55], [59, 55]],
+    extra: (c) => `<path d="M63 13V29C63 34 66 37 71 37H87Z" fill="${tint(c, 0.22)}"/><path d="M63 29C63 34 66 37 71 37H87L80 39C72 41 65 37 63 29Z" fill="${tint(c, -0.18)}" opacity=".55"/>` },
+  { // Gem: a rounded diamond, a little taller than wide
+    d: 'M42 11Q50 3 58 11L85 41Q93 50 85 59L58 89Q50 97 42 89L15 59Q7 50 15 41Z',
+    eyes: [[42, 50], [58, 50]] },
 ];
-export const SHAPE_COUNT = SHAPE_POINTS.length;
-
-// Each shape is rasterized onto a GRID×GRID pixel grid. Pixels touching the
-// outside get a dark rim on the lower right and a light one on the upper left.
-const GRID = 16;
-const PX = 100 / GRID;
-const spriteCache = new Map<number, Uint8Array>(); // 0 empty, 1 body, 2 shade, 3 highlight
-function sprite(i: number): Uint8Array {
-  const cached = spriteCache.get(i);
-  if (cached) return cached;
-  const pts = SHAPE_POINTS[i]();
-  const max = Math.max(...pts.flat().map(Math.abs));
-  const poly = pts.map(([x, y]) => [50 + (x / max) * 46, 53 + (y / max) * 46]);
-  const inside = (x: number, y: number) => {
-    let hit = false;
-    for (let a = 0, b = poly.length - 1; a < poly.length; b = a++) {
-      const [xa, ya] = poly[a];
-      const [xb, yb] = poly[b];
-      if (ya > y !== yb > y && x < ((xb - xa) * (y - ya)) / (yb - ya) + xa) hit = !hit;
-    }
-    return hit;
-  };
-  const g = new Uint8Array(GRID * GRID);
-  for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) g[r * GRID + c] = inside((c + 0.5) * PX, (r + 0.5) * PX) ? 1 : 0;
-  const on = (r: number, c: number) => r >= 0 && c >= 0 && r < GRID && c < GRID && g[r * GRID + c] > 0;
-  const out = g.slice();
-  for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) {
-    if (!g[r * GRID + c]) continue;
-    if (!on(r + 1, c) || !on(r, c + 1)) out[r * GRID + c] = 2;
-    else if (!on(r - 1, c) || !on(r, c - 1)) out[r * GRID + c] = 3;
-  }
-  spriteCache.set(i, out);
-  return out;
-}
+export const SHAPE_COUNT = CREW.length;
+// Older saves have shapes 4–13; they fold onto the four.
+const crew = (i: number): Crew => CREW[Number.isInteger(i) && i >= 0 ? i % SHAPE_COUNT : 0];
+export const CREW_COLORS = ['#8766e7', '#59b1ed', '#f6ac80', '#b4d85f'];
 
 // Mixes a #rrggbb color toward black (t < 0) or white (t > 0).
 function tint(hex: string, t: number): string {
@@ -194,9 +134,37 @@ function tint(hex: string, t: number): string {
   return `#${ch(n >> 16)}${ch((n >> 8) & 255)}${ch(n & 255)}`;
 }
 
+// A hand-drawn 16×16 body (Bot.pixels, from the 픽셀 editor) stays a pixel sprite.
+const GRID = 16;
+const PX = 100 / GRID;
+const isPixels = (p: unknown): p is string => typeof p === 'string' && /^[01]{256}$/.test(p);
+const spriteCache = new Map<string, Uint8Array>(); // 0 empty, 1 body, 2 shade, 3 highlight
+function drawn(pixels: string): Uint8Array {
+  const cached = spriteCache.get(pixels);
+  if (cached) return cached;
+  const g = Uint8Array.from(pixels, (ch) => (ch === '1' ? 1 : 0));
+  const on = (r: number, c: number) => r >= 0 && c >= 0 && r < GRID && c < GRID && g[r * GRID + c] > 0;
+  const out = g.slice();
+  for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) {
+    if (!g[r * GRID + c]) continue;
+    if (!on(r + 1, c) || !on(r, c + 1)) out[r * GRID + c] = 2;
+    else if (!on(r - 1, c) || !on(r, c - 1)) out[r * GRID + c] = 3;
+  }
+  spriteCache.set(pixels, out);
+  return out;
+}
+
+// A character's body as Bot.pixels, the pixel editor's starting point.
+export function shapeMask(i: number): string {
+  const ctx = document.createElement('canvas').getContext('2d');
+  const body = new Path2D(crew(i).d);
+  let out = '';
+  for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) out += ctx?.isPointInPath(body, (c + 0.5) * PX, (r + 0.5) * PX) ? '1' : '0';
+  return out;
+}
+
 // One <rect> per horizontal run of same-colored pixels.
-const px = (c: number, r: number, w: number, h: number, fill: string, cls = '') =>
-  `<rect${cls ? ` class="${cls}"` : ''} x="${c * PX}" y="${r * PX}" width="${w * PX}" height="${h * PX}" fill="${fill}"/>`;
+const px = (c: number, r: number, w: number, h: number, fill: string) => `<rect x="${c * PX}" y="${r * PX}" width="${w * PX}" height="${h * PX}" fill="${fill}"/>`;
 function runs(g: Uint8Array, colors: string[]): string {
   let out = '';
   for (let r = 0; r < GRID; r++) {
@@ -211,18 +179,28 @@ function runs(g: Uint8Array, colors: string[]): string {
   return out;
 }
 
-// Body and eyes are separate groups so CSS can animate them: .av-body moves the
-// whole bot, .av-look shifts the eyes (gaze), .eye blinks.
-export function avatarSvg(shape = 0, color = '#999', size = 40, { sleeping = false } = {}): string {
-  const i = Number.isInteger(shape) && shape < SHAPE_COUNT ? shape : 0;
+const EYE = '#22222c';
+const eyesOf = (pts: [number, number][], sleeping: boolean) => sleeping
+  ? pts.map(([x, y]) => `<rect x="${x - 4.5}" y="${y}" width="9" height="2.6" rx="1.3" fill="${EYE}"/>`).join('')
+  : `<g class="av-look">${pts.map(([x, y]) => `<ellipse class="eye" cx="${x}" cy="${y}" rx="3.9" ry="6.2" fill="${EYE}"/>`).join('')}</g>`;
+
+// Body and eyes are separate groups so CSS can animate them: .av-look shifts the
+// eyes (gaze), .eye blinks. Gradient ids are unique per call (they share one DOM).
+let gradId = 0;
+export function avatarSvg(shape = 0, color = '#999', size = 40, { sleeping = false, pixels = null as string | null | undefined } = {}): string {
   if (!/^#[0-9a-f]{6}$/i.test(color)) color = '#999999'; // it lands in markup
-  const body = runs(sprite(i), ['', color, tint(color, -0.32), tint(color, 0.28)]);
-  const leaf = i === SHAPE_COUNT - 1 ? px(8, 0, 1, 2, '#3a2a1a') + px(9, 0, 2, 1, '#2ec27e') + px(10, 1, 2, 1, '#2ec27e') : '';
-  // The two white eyes, the right one a pixel higher (the old tilted look).
-  const eyes = sleeping
-    ? px(6, 8, 2, 1, '#fff') + px(9, 8, 2, 1, '#fff')
-    : `<g class="av-look">${px(9, 5, 1, 3, '#fff', 'eye')}${px(11, 4, 1, 3, '#fff', 'eye')}</g>`;
-  return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" overflow="visible" shape-rendering="crispEdges"><g class="av-body">${body}${leaf}${eyes}</g></svg>`;
+  if (isPixels(pixels)) {
+    const body = runs(drawn(pixels), ['', color, tint(color, -0.32), tint(color, 0.28)]);
+    return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" overflow="visible"><g class="av-body" shape-rendering="crispEdges">${body}</g>${eyesOf([[59, 37], [72, 33]], sleeping)}</svg>`;
+  }
+  const c = crew(shape);
+  const id = `avg${++gradId}`;
+  // Matte clay: the flat color, a soft light from the upper left, a shade toward the lower right.
+  const defs = `<defs><radialGradient id="${id}l" cx=".32" cy=".22" r=".7"><stop offset="0" stop-color="#fff" stop-opacity=".34"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>`
+    + `<radialGradient id="${id}s" cx=".3" cy=".25" r=".95"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".2"/></radialGradient></defs>`;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 100 100" overflow="visible">${defs}<g class="av-body">`
+    + `<path d="${c.d}" fill="${color}"/><path d="${c.d}" fill="url(#${id}s)"/><path d="${c.d}" fill="url(#${id}l)"/>${c.extra?.(color) || ''}`
+    + `${eyesOf(c.eyes, sleeping)}</g></svg>`;
 }
 
 // Older saves stored shapes as names.
@@ -238,7 +216,7 @@ export function avatar(bot: Partial<Bot> | null | undefined, size: number, state
   // A negative delay keeps looping animations in phase across re-renders.
   const attrs = { 'data-bot': bot?.id || null, 'data-st': state, style: `width:${size}px;height:${size}px;--t0:-${Date.now() % 6000}ms` };
   if (bot?.image) return h('span', { ...attrs, class: 'avatar img' }, h('img', { src: bot.image, alt: '' }));
-  return h('span', { ...attrs, class: 'avatar', html: avatarSvg(shapeOf(bot), bot?.color || '#999', size) });
+  return h('span', { ...attrs, class: 'avatar', html: avatarSvg(shapeOf(bot), bot?.color || '#999', size, { pixels: bot?.pixels }) });
 }
 
 // Idle eyes follow the pointer.

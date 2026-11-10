@@ -108,6 +108,10 @@ export function renderApps(state: Broadcast): void {
 
 const statusOf = (server: McpServer) => S.mcpStatus[server.id]?.status;
 const needsLogin = (server: McpServer) => statusOf(server) === 'auth';
+// Enabled servers the user has to do something about: sign in or fix an error.
+const troubled = () => S.mcpServers.filter((s) => s.enabled && (statusOf(s) === 'auth' || statusOf(s) === 'error'));
+const working = () => S.mcpServers.filter((s) => s.enabled && statusOf(s) === 'connected');
+let armed = ''; // id of the server whose delete button was clicked once
 
 // Add, try without a token, open the browser only if the app asks.
 async function connect(serverId: string, item?: CatalogItem) {
@@ -184,12 +188,15 @@ function appItem({ tile, title, desc, added = false, onAdd, addLabel = '추가' 
 function catalogItems(list: CatalogItem[]) {
   return h('div', { class: 'app-grid' }, list.map((item) => {
     const server = S.mcpServers.find((s) => s.name === item.name);
-    return appItem({
+    const st = server && statusOf(server);
+    const el = appItem({
       tile: appTile(item), title: item.title, desc: item.desc,
-      added: Boolean(server && !needsLogin(server)),
-      addLabel: server ? '로그인' : '추가',
-      onAdd: () => addCatalog(item),
+      added: Boolean(server && st !== 'auth' && st !== 'error'),
+      addLabel: st === 'auth' ? '로그인 필요' : st === 'error' ? '다시 연결' : '추가',
+      onAdd: () => (server ? connect(server.id, item) : addCatalog(item)),
     });
+    if (st === 'auth' || st === 'error') el.querySelector('.add-btn')?.classList.add('attn');
+    return el;
   }));
 }
 
@@ -201,7 +208,8 @@ function skillItems(list: Skill[]) {
 
 function drawCatalog(head: Element, body: Element) {
   const search = h('input', { placeholder: '앱 및 스킬 전체 검색', value: query, oninput: (e) => { query = e.target.value; drawCatalogBody(body); } });
-  const enabled = S.mcpServers.filter((s) => s.enabled);
+  const enabled = working();
+  const todo = troubled().length;
   const more: HTMLElement = h('button', { class: `cat${MORE_CATS.includes(cat) ? ' active' : ''}`, onclick: () => popover(more, MORE_CATS.map((c) => ({ label: c, onclick: () => { cat = c; draw(); } }))) },
     MORE_CATS.includes(cat) ? cat : '더보기', icon('down', 14));
   fill(head,
@@ -209,11 +217,13 @@ function drawCatalog(head: Element, body: Element) {
       h('h2', {}, '앱 연결'),
       h('button', { class: 'connected-link', onclick: () => { view = 'connected'; draw(); } },
         h('span', { class: 'mini-tiles' }, enabled.slice(0, 4).map((s) => serverTile(s, 20))),
-        `${enabled.length}개 연결됨`, icon('chevron', 14))),
+        enabled.length ? `${enabled.length}개 연결됨` : '연결된 앱',
+        todo ? h('span', { class: 'attn-pill' }, `확인 필요 ${todo}`) : null, icon('chevron', 14))),
     h('div', { class: 'search-row' },
       h('label', { class: 'search-box' }, icon('search', 16), search),
       h('button', { class: 'outline-btn', onclick: async () => { const id = await act('importBot'); if (id) { closeModal(); window.app.select(id); } } },
-        h('span', { class: 'tpl-dot' }), 'Bot 템플릿', icon('external', 14))),
+        h('span', { class: 'tpl-dot' }), 'Bot 템플릿', icon('external', 14)),
+      h('button', { class: 'outline-btn', onclick: () => { cat = '사용자 지정'; draw(); } }, icon('plus', 14), '직접 추가')),
     h('div', { class: 'cats' }, ['전체', ...MAIN_CATS].map((c) => h('button', { class: `cat${cat === c ? ' active' : ''}`, onclick: () => { cat = c; draw(); } }, c)), more),
   );
   drawCatalogBody(body);
@@ -231,9 +241,13 @@ function drawCatalogBody(body: Element): void {
   if (cat === '맞춤 추천') return fill(body, ...section(cat, catalogItems(apps.filter((a) => a.rec))));
   if (cat !== '전체') return fill(body, ...section(cat, catalogItems(apps.filter((a) => a.cat === cat))));
   if (q) return fill(body, ...section('앱', catalogItems(apps)), ...(skills.length ? section('스킬', skillItems(skills)) : []));
+  // Overview: each app once, under the first section that has it.
+  const shown = new Set<string>();
+  const take = (list: CatalogItem[], n: number) => { const out = list.filter((a) => !shown.has(a.name)).slice(0, n); out.forEach((a) => shown.add(a.name)); return out; };
+  const recs = take(apps.filter((a) => a.rec), 6);
   fill(body,
-    ...section('맞춤 추천', catalogItems(apps.filter((a) => a.rec).slice(0, 6)), '맞춤 추천'),
-    ...[...MAIN_CATS, ...MORE_CATS.slice(0, 4)].flatMap((c) => section(c, catalogItems(apps.filter((a) => a.cat === c).slice(0, 4)), c)),
+    ...section('맞춤 추천', catalogItems(recs), '맞춤 추천'),
+    ...[...MAIN_CATS, ...MORE_CATS.slice(0, 4)].flatMap((c) => { const list = take(apps.filter((a) => a.cat === c), 4); return list.length ? section(c, catalogItems(list), c) : []; }),
     ...section('사용자 지정', h('div', { class: 'app-grid' },
       appItem({ tile: iconTile('tool'), title: 'MCP 서버', desc: 'JSON 설정으로 MCP 서버를 직접 추가해요.', onAdd: () => { cat = '사용자 지정'; draw(); } }),
       appItem({ tile: iconTile('folder'), title: '플러그인', desc: '폴더에서 Claude Code/Cursor 플러그인을 설치해요.', onAdd: () => act('installPlugin'), addLabel: '설치' }))),
@@ -254,32 +268,61 @@ function customView() {
 }
 
 function statusText(st: McpStatus): string {
-  if (st.status === 'auth') return '로그인이 필요해요';
-  if (st.status === 'error') return `오류: ${st.error}`;
+  if (st.status === 'auth') return '로그인해야 Bot이 쓸 수 있어요';
+  if (st.status === 'error') return `연결 안 됨: ${st.error}`;
   if (st.status === 'connected') return `도구 ${st.tools.length}개 · ${st.tools.slice(0, 6).join(', ')}`;
-  return st.status === 'off' ? '꺼짐' : '연결 확인 중…';
+  return st.status === 'off' ? '꺼짐: Bot이 쓰지 않아요' : '연결 확인 중…';
+}
+
+function serverRow(s: McpServer, inPlugin = false) {
+  const st: McpStatus = S.mcpStatus[s.id] || { status: s.enabled ? 'connecting' : 'off', tools: [] };
+  const fix = s.enabled && (st.status === 'auth' || st.status === 'error');
+  const del = inPlugin ? null : h('button', {
+    class: armed === s.id ? 'btn danger small' : 'x', title: '삭제',
+    onclick: () => confirmDelete(s.id, () => act('deleteMcpServer', s.id)),
+  }, armed === s.id ? '삭제할까요?' : '×');
+  return h('div', { class: `row app-row${s.enabled ? '' : ' off'}` }, serverTile(s, 36),
+    h('div', { class: 'grow' },
+      h('div', { class: 'row' }, h('b', { class: 'ellipsis' }, catalogOf(s)?.title || s.name), h('span', { class: `status ${s.enabled ? st.status : 'off'}` })),
+      h('div', { class: `small ellipsis ${fix ? 'attn-text' : 'muted'}` }, s.enabled ? statusText(st) : statusText({ status: 'off', tools: [] }))),
+    fix ? h('button', { class: 'add-btn attn', onclick: () => connect(s.id, catalogOf(s)) }, st.status === 'auth' ? '로그인' : '다시 연결')
+      : S.oauthConnected.includes(s.id) ? h('button', { class: 'add-btn', onclick: () => act('disconnectMcp', s.id) }, '로그아웃') : null,
+    h('input', { type: 'checkbox', class: 'toggle', title: s.enabled ? '끄기' : '켜기', checked: s.enabled, onchange: (e) => void Promise.resolve(act('updateMcpServer', s.id, { enabled: e.target.checked })).finally(draw) }),
+    del);
+}
+
+// Delete takes a second click within 3 seconds.
+function confirmDelete(id: string, run: () => unknown) {
+  if (armed === id) { armed = ''; run(); return; }
+  armed = id;
+  draw();
+  setTimeout(() => { if (armed === id) { armed = ''; draw(); } }, 3000);
 }
 
 function drawConnected(head: Element, body: Element) {
-  fill(head, h('div', { class: 'apps-title' }, h('div', { class: 'row' }, backBtn(), h('h2', {}, '연결된 앱'))));
+  fill(head, h('div', { class: 'apps-title' }, h('div', { class: 'row' }, backBtn(), h('h2', {}, '연결된 앱')),
+    h('button', { class: 'outline-btn', onclick: () => { view = 'catalog'; cat = '사용자 지정'; draw(); } }, icon('plus', 14), '직접 추가')));
+  const own = S.mcpServers.filter((s) => !S.plugins.some((p) => p.id === s.source));
+  const todo = own.filter((s) => troubled().includes(s));
+  const rest = own.filter((s) => !todo.includes(s));
+  const group = (title: string, list: McpServer[], note?: string): Child[] => (list.length ? [title ? h('h3', {}, title) : null, note ? h('p', { class: 'muted small group-note' }, note) : null, h('div', { class: 'list' }, list.map((s) => serverRow(s)))] : []);
   fill(body,
-    h('div', { class: 'list' }, S.mcpServers.length ? S.mcpServers.map((s) => {
-      const st: McpStatus = S.mcpStatus[s.id] || { status: s.enabled ? 'connecting' : 'off', tools: [] };
-      const plugin = S.plugins.find((p) => p.id === s.source);
-      return h('div', {},
-        h('div', { class: 'row' }, serverTile(s, 36),
-          h('div', { class: 'grow' },
-            h('div', { class: 'row' }, h('b', { class: 'ellipsis' }, catalogOf(s)?.title || s.name), h('span', { class: `status ${st.status}` }), plugin ? h('span', { class: 'badge' }, plugin.name) : null),
-            h('div', { class: 'muted small ellipsis' }, statusText(st))),
-          needsLogin(s) ? h('button', { class: 'add-btn', onclick: () => connect(s.id, catalogOf(s)) }, '로그인')
-            : S.oauthConnected.includes(s.id) ? h('button', { class: 'add-btn', onclick: () => act('disconnectMcp', s.id) }, '로그아웃') : null,
-          h('input', { type: 'checkbox', class: 'toggle', checked: s.enabled, onchange: (e) => act('updateMcpServer', s.id, { enabled: e.target.checked }) }),
-          plugin ? null : h('button', { class: 'x', title: '삭제', onclick: () => act('deleteMcpServer', s.id) }, '×')));
-    }) : h('div', { class: 'empty-row' }, '아직 연결된 앱이 없어요')),
-    S.plugins.length ? [h('h3', {}, '플러그인'), h('div', { class: 'list' }, S.plugins.map((p) => h('div', { class: 'row' },
-      h('div', { class: 'grow' }, h('b', {}, p.name), h('div', { class: 'muted small' }, p.description || p.path)),
-      h('input', { type: 'checkbox', class: 'toggle', checked: p.enabled, onchange: (e) => act('setPluginEnabled', p.id, e.target.checked) }),
-      h('button', { class: 'x', onclick: () => act('removePlugin', p.id) }, '×'))))] : null,
+    !S.mcpServers.length && !S.plugins.length ? h('div', { class: 'empty-apps' },
+      h('p', {}, '아직 연결된 앱이 없어요'),
+      h('p', { class: 'muted small' }, '앱을 연결하면 Bot이 메일, 일정, 문서 같은 내 계정의 정보를 쓸 수 있어요.'),
+      h('button', { class: 'btn primary', onclick: back }, '앱 둘러보기')) : null,
+    ...group('확인이 필요해요', todo, '로그인하거나 다시 연결하기 전까지 Bot이 이 앱을 쓰지 못해요.'),
+    ...group(todo.length ? '앱' : '', rest),
+    S.plugins.length ? [h('h3', {}, '플러그인'), h('div', { class: 'list' }, S.plugins.map((p) => {
+      const servers = S.mcpServers.filter((s) => s.source === p.id);
+      return h('div', { class: 'plugin-card' },
+        h('div', { class: 'row' },
+          h('div', { class: 'tile logo', style: 'width:36px;height:36px;border-radius:10px' }, icon('folder', 18)),
+          h('div', { class: 'grow' }, h('b', {}, p.name), h('div', { class: 'muted small ellipsis' }, p.description || p.path)),
+          h('input', { type: 'checkbox', class: 'toggle', checked: p.enabled, onchange: (e) => void Promise.resolve(act('setPluginEnabled', p.id, e.target.checked)).finally(draw) }),
+          h('button', { class: armed === p.id ? 'btn danger small' : 'x', title: '삭제', onclick: () => confirmDelete(p.id, () => act('removePlugin', p.id)) }, armed === p.id ? '삭제할까요?' : '×')),
+        servers.length ? h('div', { class: 'plugin-servers' }, servers.map((s) => serverRow(s, true))) : null);
+    }))] : null,
   );
 }
 

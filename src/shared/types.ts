@@ -19,18 +19,22 @@ export interface Bot {
   color: string;
   shape: number;
   image?: string | null; // data URL of an AI profile icon (null clears it)
+  pixels?: string | null; // a hand-drawn 16×16 body: 256 '0'/'1' (null: the shape's own)
   systemPrompt: string;
   model: string; // '' = default; 'openai:<slug>' runs on Codex
   skillIds: string[];
   serverIds: string[];
   memories: Memory[];
   drafts?: boolean; // false: outside-app writes skip the approval card
+  fallbackModel?: string; // tried once when the model is out of quota, rate limited or gone
 }
 
 export interface Attachment {
   name: string;
   dataUrl?: string;
   text?: string;
+  path?: string; // a file another Bot handed over: relative to the receiver's workspace
+  botId?: string; // the receiver whose workspace holds it (opens from the chip)
 }
 
 export interface QuestionCard {
@@ -81,8 +85,10 @@ export interface Message {
   // assistant messages
   toolCalls?: ToolCall[];
   error?: string;
+  modelDown?: boolean; // the error says the model can't be used now (quota, rate limit, retired)
   // tool entries
   toolCallId?: string;
+  parent?: string; // a sub-agent's call (never in the chat): the Task call's id
   name?: string;
   args?: Record<string, unknown>;
   effect?: Effect;
@@ -211,6 +217,8 @@ export interface AuditEntry {
   effect: Effect;
   outcome: 'ok' | 'refused' | 'error';
   output: string;
+  callId?: string; // the tool_use id
+  parent?: string; // a sub-agent's call: the callId of the Task call that started it
 }
 
 export interface Provider {
@@ -239,6 +247,7 @@ export interface Settings {
   fullAccess: boolean;
   blockAccountWrites: boolean;
   micId: string; // '' = the system default microphone
+  updateCheck: boolean; // look for a newer OCTO CREW release on launch and daily
   onboarded: boolean; // first-run setup (accounts, name, team) finished
   mainBotId?: string;
 }
@@ -248,6 +257,7 @@ export interface Usage {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  bots?: Record<string, Record<string, Omit<Usage, 'bots'>>>; // botId -> model -> totals
 }
 
 export interface State {
@@ -279,6 +289,7 @@ export interface ActiveRun {
   phase: 'thinking' | 'working';
   queue: string[];
   delegates?: string[];
+  subagents?: number; // sub-agents (Task calls) still working
   threadOf?: string;
   viaBotId?: string;
   status?: { subject: string; verb: string }; // set_status: "학회 정보 검색 중"
@@ -329,6 +340,7 @@ export interface Broadcast extends State {
   legacySecrets: 'importing' | 'failed' | null; // CharacterBot 0.1.x secrets not yet imported
   oauthConnected: string[];
   hasGoogleClient: boolean;
+  appUpdate: { version: string; url: string } | null; // a newer release, if one was found
   providerKeys: string[];
   claude: LoginStatus | null;
   chatgpt: LoginStatus | null;

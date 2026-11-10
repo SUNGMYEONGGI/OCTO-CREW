@@ -1,10 +1,11 @@
 import type { FileEntry } from '../main/tools';
-import type { ActiveRun, Approval, Bot, Broadcast, Conv, MeetingCard, Message, QuestionCard, Routine, Section, Skill, SkillCard, StreamChunk } from '../shared/types';
+import { ASSISTANT_RULES, CATEGORIES, TEMPLATES, type BotTemplate } from './templates';
+import type { ActiveRun, Approval, AuditEntry, Bot, Broadcast, Conv, MeetingCard, Message, QuestionCard, Routine, Section, Skill, SkillCard, StreamChunk } from '../shared/types';
 import { openSettings, renderSettings, planUsage, refreshUsage, confirmLogout, SETTINGS_TABS } from './settings';
 import { openApps, renderApps, serverTile } from './apps';
 import {
   h, fill, $, act, icon, avatar, avatarSvg, userAvatar, editing, toast, openModal, closeModal, modalOpen,
-  toggle, popover, relativeDay, shapeOf, SHAPE_COUNT, modelName, modelOptions, setAvatarState,
+  toggle, popover, relativeDay, shapeOf, shapeMask, SHAPE_COUNT, CREW_COLORS, modelName, modelOptions, setAvatarState,
   type Child, type MenuItem,
 } from './ui';
 import { searchMessages } from '../shared/search';
@@ -20,6 +21,7 @@ const ui: {
   panelOpen: boolean;
   history: { list: string[]; index: number };
   threadId: string | null;
+  exchange?: { runs: [string, string][]; one: boolean } | null; // bot-to-bot runs open in the panel: [convId, first message id]
   bundles: Set<string>;
   keepUnread?: string | null;
   suggest?: { list: Suggestion[]; index: number; el: HTMLTextAreaElement } | null;
@@ -32,7 +34,9 @@ const ui: {
 
 type Suggestion = { label: string; apply: () => void; icon?: string; hint?: string; bot?: Bot; tile?: HTMLElement; status?: string; kind?: string };
 
-const COLORS = ['#111111', '#a0673b', '#ef3b4b', '#f26a1b', '#f7931a', '#20b15a', '#15b8a6', '#2f7cf6', '#8b5cf6', '#ec4899', '#8e8e8e'];
+// A random crew member in its own color.
+const crewLook = () => { const shape = Math.floor(Math.random() * SHAPE_COUNT); return { shape, color: CREW_COLORS[shape] }; };
+const COLORS = ['#8766e7', '#59b1ed', '#f6ac80', '#b4d85f', '#111111', '#a0673b', '#ef3b4b', '#f26a1b', '#f7931a', '#20b15a', '#15b8a6', '#2f7cf6', '#8b5cf6', '#ec4899', '#8e8e8e'];
 const botById = (id: string | undefined) => S.bots.find((b) => b.id === id);
 const conv = () => S.convs.find((c) => c.id === ui.convId);
 // The chat views only render while a conversation is selected.
@@ -67,7 +71,7 @@ function renderSidebar() {
   const plus: HTMLElement = h('button', { class: 'circle-btn', title: '새로 만들기', onclick: () => popover(plus, [
     { icon: 'message', label: '새 메시지', onclick: openNewMessage },
     { icon: 'plus', label: '새 Bot 만들기', onclick: openNewBot },
-    { icon: 'sparkle', label: 'AI 비서 템플릿', chevron: true, onclick: () => popover(plus, ASSISTANTS.map((t) => ({ label: t.name, hint: t.description, onclick: () => createFromTemplate(t) }))) },
+    { icon: 'sparkle', label: '템플릿 갤러리', onclick: openGallery },
     { icon: 'download', label: '가져오기', chevron: true, onclick: () => popover(plus, [
       { icon: 'download', label: 'Bot 템플릿 가져오기', onclick: async () => select(await act('importBot')) },
       { icon: 'file', label: 'CSV에서 Bot 가져오기', onclick: importBotsCsv },
@@ -304,12 +308,12 @@ function toolItem(c: Conv, m: Message): HTMLElement | null {
 }
 
 // "메시지 보냄 (avatars) Bot 4개", "Bot 만듦 (avatar) Reviewer", "팀 만듦 HCI 리뷰어"
-// for what a bot did with create_bot / create_team / message_team.
+// for what a bot did with create_bot / create_team / message_bot(s) / message_team.
 function teamLine(m: Message): HTMLElement | null {
   const short = (m.name || '').replace(/^mcp__characterbot__/, '');
   if (!m.content || m.content.startsWith('Error')) return null;
   const a = (m.args || {}) as Record<string, unknown>;
-  const named = (n: unknown) => S.bots.find((b) => b.name.toLowerCase() === String(n).replace(/^@/, '').toLowerCase());
+  const named = (n: unknown) => S.bots.find((b) => b.name.toLowerCase() === String(n).trim().replace(/^@/, '').toLowerCase());
   const stack = (bots: Bot[]) => h('span', { class: 'av-stack' }, ...bots.slice(0, 4).map((b) => avatar(b, 20)));
   if (short === 'create_bot') {
     const bot = named(a.name);
@@ -318,6 +322,15 @@ function teamLine(m: Message): HTMLElement | null {
   if (short === 'create_team' || short === 'add_to_team') {
     const bots = ((a.bots as string[]) || []).map(named).filter((b): b is Bot => Boolean(b));
     return h('div', { class: 'team-line' }, short === 'create_team' ? '팀 만듦' : '팀원 추가', h('b', null, String(a.name || a.team)), stack(bots));
+  }
+  if (short === 'message_bot' || short === 'message_bots') {
+    const names = short === 'message_bot' ? [String(a.bot_name)] : ((a.bot_names as string[]) || []);
+    const bots = names.map(named).filter((b): b is Bot => Boolean(b));
+    const open = () => openExchange(exchangesOf(m, names), true);
+    if (!bots.length) return null;
+    return bots.length === 1
+      ? h('button', { class: 'team-line', title: '주고받은 메시지 열기', onclick: open }, '메시지 보냄', avatar(bots[0], 20), h('b', null, bots[0].name))
+      : h('button', { class: 'team-line', title: '주고받은 메시지 열기', onclick: open }, '메시지 보냄', stack(bots), `Bot ${bots.length}개`);
   }
   if (short === 'message_team') {
     const team = S.convs.find((c) => c.kind === 'group' && c.name.toLowerCase() === String(a.team).toLowerCase());
@@ -395,11 +408,66 @@ function bundleItem(c: Conv, run: Message[]): HTMLElement {
   const from = botById(run[0].viaBotId);
   const n = run.filter((m) => (m.role === 'user' || m.role === 'assistant') && (m.content || m.error)).length;
   const key = run[0].id;
-  const open = ui.bundles.has(key);
+  const open = ui.exchange?.runs.some(([, id]) => id === key);
   return h('div', { class: `bundle${open ? ' open' : ''}` },
-    h('button', { class: 'bundle-head', onclick: () => { if (open) ui.bundles.delete(key); else ui.bundles.add(key); renderThread(); } },
-      `메시지 ${n}개 · `, avatar(from, 18), h('b', {}, from?.name || 'Bot')),
-    open ? h('div', { class: 'bundle-body' }, messageItems(c, run.map(({ viaBotId, ...m }) => m))) : null);
+    h('button', { class: 'bundle-head', title: '대화 열기', onclick: () => (open ? closeExchange() : openExchange([[c.id, key]])) },
+      `메시지 ${n}개 · `, avatar(from, 18), h('b', {}, from?.name || 'Bot')));
+}
+
+// The messages of a bot-to-bot run, from its first message on: the whole
+// folded bundle, or (one) just that request and its answer.
+function exchangeRun(c: Conv, firstId: string, one = false): Message[] {
+  const i = c.messages.findIndex((m) => m.id === firstId);
+  if (i < 0) return [];
+  const via = c.messages[i].viaBotId;
+  let j = i;
+  while (j + 1 < c.messages.length && c.messages[j + 1].viaBotId === via && !(one && c.messages[j + 1].role === 'user')) j++;
+  return c.messages.slice(i, j + 1);
+}
+
+// Where a message_bot(s) call landed: the run in each target's DM that starts
+// with the same text from this bot.
+function exchangesOf(m: Message, names: string[]): [string, string][] {
+  return names.flatMap((n): [string, string][] => {
+    const bot = S.bots.find((b) => b.name.toLowerCase() === n.trim().replace(/^@/, '').toLowerCase());
+    const dm = bot && S.convs.find((x) => x.kind === 'dm' && x.botIds[0] === bot.id);
+    const first = dm?.messages.find((x) => x.viaBotId === m.botId && x.role === 'user' && x.ts >= m.ts - 5000 && x.content === (m.args as { message?: string })?.message);
+    return dm && first ? [[dm.id, first.id]] : [];
+  });
+}
+
+function openExchange(runs: [string, string][], one = false): void {
+  if (!runs.length) return void toast('주고받은 메시지를 찾지 못했어요');
+  ui.exchange = { runs, one };
+  ui.threadId = null;
+  ui.threadEls = null;
+  ui.panelOpen = true;
+  render(true);
+}
+
+function closeExchange() {
+  ui.exchange = null;
+  render(true);
+}
+
+// Bot-to-bot messages in the right panel: one section per receiving bot.
+function exchangeView(): HTMLElement | null {
+  const { runs: ids = [], one = false } = ui.exchange || {};
+  const runs = ids.flatMap(([convId, id]) => {
+    const c = S.convs.find((x) => x.id === convId);
+    const run = c ? exchangeRun(c, id, one) : [];
+    return c && run.length ? [{ c, run }] : [];
+  });
+  if (!runs.length) { ui.exchange = null; return null; }
+  const from = botById(runs[0].run[0].viaBotId);
+  return h('div', { class: 'thread-view' },
+    h('div', { class: 'panel-top' },
+      h('span', { class: 'grow thread-title' }, avatar(from, 20), ` ${from?.name || 'Bot'}이(가) 보낸 메시지`),
+      h('button', { class: 'circle-btn bordered', title: '닫기', onclick: closeExchange }, icon('close', 18))),
+    h('div', { class: 'thread-list' }, runs.map(({ c, run }) => [
+      runs.length > 1 ? h('div', { class: 'thread-sep' }, h('span', {}, convTitle(c))) : null,
+      messageItems(c, run.map(({ viaBotId, ...m }) => m), { inThread: true }),
+    ])));
 }
 
 // "보낸 사람 [avatar] name" under a greeting; opens the maker's note.
@@ -410,6 +478,24 @@ function briefItem(m: Message): HTMLElement {
     h('button', { class: 'bundle-head', onclick: () => { if (open) ui.bundles.delete(m.id); else ui.bundles.add(m.id); renderThread(); } },
       '보낸 사람 ', avatar(from, 18), h('b', {}, from?.name || 'Bot')),
     open ? h('div', { class: 'bundle-body' }, h('div', { class: 'grouped' }, avatar(from, 22), h('div', { class: 'msg bot', html: md(m.content) }))) : null);
+}
+
+// Attached images and files; a file another Bot handed over opens from its chip.
+function attachRow(m: Message, cls = ''): HTMLElement {
+  return h('div', { class: `attach-row ${cls}` }, (m.attachments || []).map((a) => (a.dataUrl ? h('img', { class: 'thumb', src: a.dataUrl, title: '이미지 전체 화면으로 열기' })
+    : a.path && a.botId ? h('button', { class: 'chip', title: '열기', onclick: () => act('openFile', a.botId as string, a.path as string) }, icon('file', 14), a.name)
+    : h('span', { class: 'chip' }, icon('file', 14), a.name))));
+}
+
+// A model that can't run now (quota, rate limit, retired) offers another one.
+function errorBubble(c: Conv, m: Message): HTMLElement {
+  if (!m.modelDown) return h('div', { class: 'msg error' }, m.error);
+  const bot = botById(m.botId);
+  const pick = h('select', { class: 'select' }, modelOptions(S.models, `기본값 (${modelName(S.models, S.settings.model)})`)
+    .filter(([v]) => v !== (bot?.model ?? '')).map(([v, l]) => h('option', { value: v }, l)));
+  return h('div', { class: 'msg error' }, m.error,
+    h('div', { class: 'retry-row' }, h('span', { class: 'grow' }, '이 모델을 지금 쓸 수 없어요'), pick,
+      h('button', { class: 'btn soft', onclick: () => act('retryWithModel', c.id, m.id, pick.value) }, '다른 모델로 다시 시도')));
 }
 
 // Render items (bubbles, cards, time stamps) for a list of messages.
@@ -424,7 +510,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
     if (m.brief) {
       let j = i;
       while (j + 1 < list.length && !(list[j + 1].role === 'user' && !list[j + 1].viaBotId)) j++;
-      items.push(...messageItems(c, list.slice(i + 1, j + 1), { ...opts, since: m.ts }), briefItem(m));
+      items.push(...messageItems(c, list.slice(i + 1, j + 1), { ...opts, since: m.ts }), ...(m.fromBotId ? [briefItem(m)] : []));
       i = j;
       lastSender = null;
       continue;
@@ -446,6 +532,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
     if (m.role === 'user' && m.fromBotId) {
       const from = botById(m.fromBotId);
       if (lastSender !== m.fromBotId) items.push(h('div', { class: 'sender', style: `color:${from?.color || 'inherit'}` }, from?.name || 'Bot'));
+      if (m.attachments?.length) items.push(attachRow(m, 'from-bot'));
       items.push(h('div', { class: 'grouped' }, avatar(from, 22), withExtras(c, m, h('div', { class: 'msg bot', html: md(m.content) }), 'bot', opts)));
       lastSender = m.fromBotId;
       continue;
@@ -454,7 +541,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
       lastSender = 'user';
       const skill = m.skillId && S.skills.find((s) => s.id === m.skillId);
       if (m.routineId) { items.push(h('div', { class: `routine-tag${ui.flashId === m.id ? ' found' : ''}`, 'data-mid': m.id }, icon('clock', 14), m.content.replace(/^⏰ 루틴: /, '루틴 · '))); continue; }
-      if (m.attachments?.length) items.push(h('div', { class: 'attach-row' }, m.attachments.map((a) => (a.dataUrl ? h('img', { class: 'thumb', src: a.dataUrl, title: '이미지 전체 화면으로 열기' }) : h('span', { class: 'chip' }, icon('file', 14), a.name)))));
+      if (m.attachments?.length) items.push(attachRow(m));
       if (skill) items.push(h('div', { class: 'attach-row' }, h('span', { class: 'chip' }, icon('sparkle', 14), skill.name)));
       items.push(withExtras(c, m, m.voice ? voiceBubble({ ...m, voice: m.voice }) : h('div', { class: 'msg user' }, m.content), 'user', opts));
       continue;
@@ -462,7 +549,7 @@ function messageItems(c: Conv, list: Message[], opts: { inThread?: boolean; sinc
     // assistant
     if (!m.content && !m.error) continue;
     const bot = botById(m.botId);
-    const bubble = m.error ? h('div', { class: 'msg error' }, m.error) : withExtras(c, m, botBubble(c, m), 'bot', opts);
+    const bubble = m.error ? errorBubble(c, m) : withExtras(c, m, botBubble(c, m), 'bot', opts);
     if (c.kind !== 'group' && !(opts.inThread && list.some((x) => x.role === 'assistant' && x.botId !== c.botIds[0]))) { items.push(bubble); lastSender = m.botId; continue; }
     const next = list.slice(i + 1).find((x) => x.role !== 'tool');
     const lastOfRun = !next || next.botId !== m.botId || next.role !== 'assistant';
@@ -484,8 +571,8 @@ function activityRow(c: Conv): HTMLElement | null {
   if (!bots.length) return null;
   const st = botState(a.botId);
   // set_status: "학회 정보 검색 중", the subject dark and the verb muted.
-  if (a.status && st !== 'blocked') return h('div', { class: 'activity-row' }, avatar(bots[0], 24), h('span', { class: 'who' }, h('span', { class: 'lead' }, a.status.subject), ' ', h('span', { class: 'verb' }, a.status.verb)));
-  const verb = st === 'blocked' ? '승인 기다리는 중' : st === 'streaming' && bots.length === 1 ? '입력 중' : '작업 중';
+  if (a.status && st !== 'blocked') return h('div', { class: 'activity-row' }, avatar(bots[0], 24), h('span', { class: 'who' }, h('span', { class: 'lead' }, a.status.subject), ' ', h('span', { class: 'verb' }, a.status.verb, a.subagents ? ` · 하위 에이전트 ${a.subagents}개 작업 중` : '')));
+  const verb = st === 'blocked' ? '승인 기다리는 중' : a.subagents ? `작업 중 · 하위 에이전트 ${a.subagents}개 작업 중` : st === 'streaming' && bots.length === 1 ? '입력 중' : '작업 중';
   const names = bots.map((b, i) => h('span', { class: i ? '' : 'lead' }, b.name));
   const joined = names.flatMap((n, i) => (i === 0 ? [n] : [i === names.length - 1 ? ' 및 ' : ', ', n]));
   return h('div', { class: 'activity-row' }, avatar(bots[0], 24), h('span', { class: 'who' }, ...joined, ` ${verb}`, h('span', { class: 'ell' }, h('i', {}, '.'), h('i', {}, '.'), h('i', {}, '.'))));
@@ -514,6 +601,7 @@ function renderThread() {
 
 function openThread(id: string): void {
   ui.threadId = id;
+  ui.exchange = null;
   ui.panelOpen = true;
   render(true);
   ui.threadEls?.ta.focus();
@@ -1004,14 +1092,33 @@ function computerTab(c: Conv, bot: Bot): Child[] {
   const screen = running && lastTool
     ? h('div', { class: 'screen' }, h('pre', {}, `$ ${stepLabel(lastTool)}\n\n${(lastTool.content || '실행 중…').slice(-1500)}`))
     : h('div', { class: 'screen' }, h('div', { class: 'zz' }, 'z z'), h('span', { class: 'avatar', html: avatarSvg(0, '#8e8e8e', 34, { sleeping: true }) }), h('div', { style: 'font-weight:500;font-size:14px' }, '컴퓨터가 잠들어 있어요'));
-  const entries = S.audit.filter((a) => a.botId === bot.id).slice(-40).reverse();
+  const mine = S.audit.filter((a) => a.botId === bot.id);
+  // A sub-agent's steps nest under the Task call that started it; while it
+  // still runs (no Task entry yet) they group under "하위 에이전트".
+  const calls = new Set(mine.map((a) => a.callId));
+  const kids = new Map<string, AuditEntry[]>();
+  for (const a of mine) if (a.parent) kids.set(a.parent, [...(kids.get(a.parent) || []), a]);
+  const top = mine.filter((a) => !a.parent).slice(-40);
+  const working = [...kids.keys()].filter((p) => !calls.has(p));
+  const time = (ts: number) => new Date(ts).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+  const entry = (a: AuditEntry): HTMLElement => {
+    const steps = (a.callId && kids.get(a.callId)) || [];
+    return h('details', {},
+      h('summary', { class: 'row small' }, h('span', { class: `badge ${a.outcome}` }, a.outcome), h('span', { class: 'grow ellipsis' }, stepLabel({ name: a.tool, args: a.args } as Message)),
+        steps.length ? h('span', { class: 'muted' }, `하위 에이전트 · ${steps.length}단계`) : null, h('span', { class: 'muted' }, time(a.ts))),
+      steps.length ? h('div', { class: 'list activity sub' }, steps.map(entry)) : null,
+      h('pre', {}, a.output));
+  };
+  // Steps whose Task never finished (the run stopped or failed) show as stopped.
+  const live = Object.values(S.runtime.active || {}).some((r) => r.botId === bot.id && (r.subagents || 0) > 0);
+  const runningSubs = working.map((p) => h('details', { open: live },
+    h('summary', { class: 'row small' }, live ? h('span', { class: 'badge running' }, '실행 중') : h('span', { class: 'badge' }, '중단됨'), h('span', { class: 'grow ellipsis' }, '하위 에이전트'), h('span', { class: 'muted' }, `${kids.get(p)?.length}단계`)),
+    h('div', { class: 'list activity sub' }, (kids.get(p) || []).map(entry))));
   return [
     screen,
     h('div', { class: 'caption' }, `${bot.name}의 화면`),
-    entries.length ? [h('div', { class: 'section-title' }, '최근 활동'),
-      h('div', { class: 'list activity' }, entries.map((a) => h('details', {},
-        h('summary', { class: 'row small' }, h('span', { class: `badge ${a.outcome}` }, a.outcome), h('span', { class: 'grow ellipsis' }, stepLabel({ name: a.tool, args: a.args } as Message)), h('span', { class: 'muted' }, new Date(a.ts).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' }))),
-        h('pre', {}, a.output))))] : null,
+    top.length || runningSubs.length ? [h('div', { class: 'section-title' }, '최근 활동'),
+      h('div', { class: 'list activity' }, runningSubs, [...top].reverse().map(entry))] : null,
   ];
 }
 
@@ -1031,6 +1138,19 @@ async function renderPanel(force = false) {
   document.body.classList.toggle('panel-closed', !ui.panelOpen);
   if (!ui.panelOpen) return;
   const c = currentConv();
+  if (ui.exchange) {
+    // Rebuilt on each broadcast: skip while the user is typing or picking, keep the scroll.
+    if (!force && editing(el)) return;
+    const top = el.querySelector('.thread-list')?.scrollTop;
+    const view = exchangeView();
+    if (view) {
+      fill(el, view);
+      const list = view.querySelector('.thread-list');
+      if (list && top != null) list.scrollTop = top;
+      renderDiagrams(view);
+      return;
+    }
+  }
   const thread = ui.threadId && threadView(c);
   if (thread) {
     if (el.firstChild !== thread) fill(el, thread);
@@ -1078,18 +1198,40 @@ function confirmThen(title: string, text: string, fn: () => void, label = '삭�
 }
 
 // Shape + color picker used by "새 Bot 만들기" and the avatar editor.
-type Look = { shape: number; color: string; image: string | null };
+type Look = { shape: number; color: string; image: string | null; pixels?: string | null };
 function avatarPicker(state: Look, onChange?: () => void) {
   const preview = h('span', { class: 'avatar' });
   const shapes = h('div', { class: 'shapes' });
   const colors = h('div', { class: 'colors' });
   const draw = () => {
-    preview.innerHTML = avatarSvg(state.shape, state.color, 112);
-    fill(shapes, ...Array.from({ length: SHAPE_COUNT }, (_, i) => h('button', { class: `shape-btn${state.shape === i ? ' sel' : ''}`, onclick: () => { state.shape = i; draw(); onChange?.(); }, html: avatarSvg(i, '#9a9a9a', 40) })));
+    preview.innerHTML = avatarSvg(state.shape, state.color, 112, { pixels: state.pixels });
+    fill(shapes, ...Array.from({ length: SHAPE_COUNT }, (_, i) => h('button', { class: `shape-btn${state.shape === i && !state.pixels ? ' sel' : ''}`, onclick: () => { state.shape = i; state.pixels = null; draw(); onChange?.(); }, html: avatarSvg(i, '#9a9a9a', 40) })));
     fill(colors, ...COLORS.map((col) => h('button', { class: `color-btn${state.color === col ? ' sel' : ''}`, style: `background:${col}`, onclick: () => { state.color = col; draw(); onChange?.(); } })));
   };
   draw();
-  return { preview, shapes, colors };
+  return { preview, shapes, colors, draw };
+}
+
+// "픽셀": nudge the body pixel by pixel on its 16×16 grid; drag paints.
+function pixelGrid(state: Look, redraw: () => void): { el: HTMLElement; draw: () => void } {
+  const grid = h('div', { class: 'pixel-grid' });
+  let paint: '0' | '1' | null = null;
+  const set = (i: number) => {
+    const bits = (state.pixels || shapeMask(state.shape)).split('');
+    if (paint === null || bits[i] === paint) return;
+    bits[i] = paint;
+    state.pixels = bits.join('');
+    redraw();
+    draw();
+  };
+  const draw = () => fill(grid, ...(state.pixels || shapeMask(state.shape)).split('').map((bit, i) => h('button', {
+    class: bit === '1' ? 'on' : '', style: bit === '1' ? `background:${state.color}` : '', 'aria-label': `${(i >> 4) + 1}행 ${(i % 16) + 1}열`,
+    onmousedown: (e) => { e.preventDefault(); paint = bit === '1' ? '0' : '1'; document.addEventListener('mouseup', () => { paint = null; }, { once: true }); set(i); },
+    onmouseenter: () => set(i),
+  })));
+  grid.addEventListener('mouseleave', () => { paint = null; });
+  draw();
+  return { el: grid, draw };
 }
 
 // Profile: the round character (shape + color) or an AI icon made on ChatGPT
@@ -1099,7 +1241,11 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
   let busy = false;
   let source: string | null = null; // data URL of the image to reinterpret
   const body = h('div', { class: 'dialog-body creator', style: 'padding:6px 0' });
-  const { preview, shapes, colors } = avatarPicker(state);
+  let redrawGrid = () => {};
+  const { preview, shapes, colors, draw: drawPicker } = avatarPicker(state, () => redrawGrid());
+  const grid = pixelGrid(state, drawPicker);
+  redrawGrid = grid.draw;
+  const reset = h('button', { class: 'btn ghost', onclick: () => { state.pixels = null; drawPicker(); grid.draw(); } }, '모양으로 되돌리기');
   const note = h('input', { class: 'field', placeholder: '추가 요청 (선택) · 예: 안경은 유지, 하늘색 머리' });
   const file: HTMLInputElement = h('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: () => file.files?.[0] && take(file.files[0]) });
   const take = (f: File) => { const r = new FileReader(); r.onload = () => { source = r.result as string; draw(); }; r.readAsDataURL(f); };
@@ -1117,8 +1263,12 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
   };
   const seg = h('div', { class: 'seg' });
   const draw = (): void => {
-    fill(seg, ...[['character', '캐릭터'], ['ai', 'AI 프로필']].map(([k, label]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; draw(); } }, label)));
+    fill(seg, ...[['character', '캐릭터'], ['pixels', '픽셀'], ['ai', 'AI 프로필']].map(([k, label]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; draw(); } }, label)));
     if (mode === 'character') return void fill(body, seg, preview, nameField, shapes, colors);
+    if (mode === 'pixels') {
+      grid.draw();
+      return void fill(body, seg, h('div', { class: 'pixel-studio' }, preview, grid.el), nameField, colors, h('div', { style: 'text-align:center' }, reset));
+    }
     const ready = S.chatgpt?.loggedIn && S.settings.chatgpt;
     const face = busy ? h('div', { class: 'spin-wrap' }, h('span', { class: 'ring spin' }))
       : state.image ? avatar({ image: state.image }, 112) : h('div', { class: 'spin-wrap muted' }, icon('image', 30));
@@ -1127,42 +1277,63 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
     fill(body, seg, h('div', { class: 'studio' }, face, nameField,
       ready ? [drop, file, note,
         h('button', { class: 'btn soft', disabled: busy ? true : null, onclick: generate }, icon('sparkle', 15), busy ? ' 생성 중… (1분 정도)' : state.image ? ' 다시 생성' : ' 프로필 생성'),
-        h('div', { class: 'muted small' }, 'ChatGPT 구독으로 PixelBot 스타일 프로필 아이콘을 만들어요.')]
+        h('div', { class: 'muted small' }, 'ChatGPT 구독으로 OCTO CREW 스타일 프로필 아이콘을 만들어요.')]
         : [h('div', { class: 'muted small', style: 'text-align:center' }, 'AI 프로필은 ChatGPT 구독으로 만들어요.'),
           h('button', { class: 'btn soft', onclick: () => { closeModal(); openSettings('general'); } }, icon('openai', 15), ' ChatGPT 연결')]));
   };
   draw();
-  return { body, look: () => (mode === 'ai' && state.image ? { image: state.image } : { shape: state.shape, color: state.color, image: null }) };
+  return { body, look: () => (mode === 'ai' && state.image ? { image: state.image } : { shape: state.shape, color: state.color, image: null, pixels: state.pixels || null }) };
 }
 
-// Assistant templates for the + menu.
-const ASSISTANT_RULES = '당신은 먼저 챙기는(proactive) 비서입니다. 사용자가 요청하지 않은 회의 초대를 발견하면 request_meeting_approval 카드로 참석 여부를 물으세요. 정기 점검 때 사용자가 알아야 할 일을 찾으면 묻기 전에 먼저 알리고, 다음 행동을 제안하세요. 연결된 앱(캘린더, 메일, Slack, Notion 등)을 직접 조회해 사실에 근거해 답하세요. 메일 발송·메시지 전송·삭제처럼 남에게 보이거나 되돌리기 어려운 일은 초안을 먼저 보여주고 승인을 받으세요. 매일 반복할 일은 schedule_routine으로 루틴을 제안하고, 사용자의 선호와 사람·프로젝트 정보는 remember로 기억하세요. 답은 짧고 훑어보기 쉽게 쓰세요.';
-const ASSISTANTS = [
-  { name: '비서실장', description: '메일·Slack·일정에서 내가 결정할 일을 골라 순서대로 알려줘요', prompt: '당신은 사용자의 비서실장입니다. Slack, 이메일, 캘린더를 살펴 사용자가 확인하거나 결정해야 할 일을 우선순위대로 정리하고, 놓친 요청과 마감을 짚어 줍니다.',
-    routines: [{ daily_time: '09:00', prompt: '오늘 확인하거나 결정해야 할 일을 Slack·메일·캘린더에서 찾아 우선순위대로 알려줘.' }, { every_minutes: 60, prompt: '지난 1시간 동안 나에게 온 요청·멘션·급한 메일이 있으면 알려줘.' }] },
-  { name: '아침 브리핑', description: '매일 아침 오늘 일정과 챙길 일을 한 화면으로 정리해요', prompt: '당신은 일일 브리핑 작성자입니다. 오늘 일정, 중요한 메일과 메시지, 마감이 다가오는 일을 추려 아침마다 한 화면짜리 브리핑으로 정리합니다.',
-    routines: [{ daily_time: '08:00', prompt: '오늘의 일일 브리핑을 작성해줘.' }] },
-  { name: '임원 비서', description: '회의 준비와 일정 조율을 맡고, 늦게 들어온 대화는 요약해 줘요', prompt: '당신은 사용자의 임원 비서입니다. 아침 브리핑, 회의 준비 자료, 일정 조율, 후속 조치 정리를 맡고, 대화에 늦게 합류하면 놓친 내용을 요약해 줍니다.',
-    routines: [{ daily_time: '08:30', prompt: '아침 브리핑을 해줘.' }, { every_minutes: 30, prompt: '1시간 안에 시작하는 회의가 있으면 준비 자료(참석자, 관련 메일·문서, 안건)를 정리해 알려줘.' }, { every_minutes: 60, prompt: '내가 아직 응답하지 않은 새 회의 초대가 있으면 request_meeting_approval로 참석 여부를 물어봐줘.' }] },
-  { name: '메일 정리', description: '새 메일을 분류하고 답장이 필요한 메일엔 초안을 붙여 줘요', prompt: '당신은 받은 편지함 관리자입니다. 새 메일을 긴급/답장 필요/참고/무시로 분류하고, 긴급 스레드를 먼저 알려 주며, 답장이 필요한 메일에는 승인용 초안을 작성합니다.',
-    routines: [{ every_minutes: 30, prompt: '새 메일을 분류하고, 긴급하거나 답장이 필요한 메일이 있으면 초안과 함께 알려줘.' }] },
-];
+const createAssistant = (t: BotTemplate) =>
+  act('createAssistant', t.name, { ...crewLook(), label: t.description,
+    systemPrompt: `${t.prompt}\n\n${t.category === '비서' ? ASSISTANT_RULES : '사용자의 언어로 답하세요.'}` }, t.routines);
 
-const createAssistant = (t: (typeof ASSISTANTS)[number]) =>
-  act('createAssistant', t.name, { shape: Math.floor(Math.random() * SHAPE_COUNT), color: COLORS[Math.floor(Math.random() * COLORS.length)], label: t.description, systemPrompt: `${t.prompt}\n\n${ASSISTANT_RULES}` }, t.routines);
-
-async function createFromTemplate(t: (typeof ASSISTANTS)[number]) {
+async function createFromTemplate(t: BotTemplate) {
   const id = await createAssistant(t);
-  if (id) { ui.tab = 'details'; select(id); }
+  if (id) { closeModal(); ui.tab = 'details'; select(id); }
+}
+
+// The template gallery: categories, search, and a preview of each template's
+// instructions, routines and the apps it works with.
+function openGallery() {
+  let category = '전체';
+  let picked: BotTemplate | null = null;
+  const search: HTMLInputElement = h('input', { class: 'field', placeholder: '템플릿 검색', oninput: () => draw() });
+  const chips = h('div', { class: 'seg gallery-cats' });
+  const list = h('div', { class: 'gallery-list' });
+  const detail = h('div', { class: 'gallery-detail' });
+  const connected = (app: string) => S.mcpServers.some((s) => s.name.toLowerCase().includes(app.toLowerCase()) || app.toLowerCase().includes(s.name.toLowerCase()));
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    const shown = TEMPLATES.filter((t) => (category === '전체' || t.category === category) && (!q || `${t.name} ${t.description} ${t.prompt}`.toLowerCase().includes(q)));
+    if (!picked || !shown.includes(picked)) picked = shown[0] || null;
+    fill(chips, ...['전체', ...CATEGORIES].map((c) => h('button', { class: c === category ? 'on' : '', onclick: () => { category = c; draw(); } }, c)));
+    fill(list, shown.length ? shown.map((t) => h('button', { class: `pick-row${t === picked ? ' sel' : ''}`, onclick: () => { picked = t; draw(); } },
+      h('span', { class: 'grow' }, h('b', {}, t.name), h('div', { class: 'muted small' }, t.description)))) : h('div', { class: 'muted small' }, '찾는 템플릿이 없어요'));
+    const t = picked;
+    fill(detail, t ? [
+      h('div', { style: 'font-weight:600;font-size:17px' }, t.name), h('div', { class: 'muted small' }, `${t.category} · ${t.description}`),
+      h('div', { class: 'label' }, '지침'), h('div', { class: 'small' }, t.prompt),
+      t.routines.length ? [h('div', { class: 'label' }, '루틴'), t.routines.map((r) => h('div', { class: 'small' }, icon('clock', 13), ` ${r.daily_time ? `매일 ${r.daily_time}` : `${r.every_minutes}분마다`} · ${r.prompt}`))] : null,
+      t.apps.length ? [h('div', { class: 'label' }, '함께 쓰는 앱'), h('div', { class: 'attach-row from-bot', style: 'margin-left:0' }, t.apps.map((a) => h('span', { class: 'chip' }, a, connected(a) ? h('span', { class: 'muted' }, ' · 연결됨') : null)))] : null,
+      h('div', { class: 'btns', style: 'margin-top:16px' }, h('button', { class: 'btn primary', onclick: () => createFromTemplate(t) }, '이 템플릿으로 만들기')),
+    ] : null);
+  };
+  draw();
+  openModal(dialog('Bot 템플릿', [search, chips, h('div', { class: 'gallery' }, list, detail)], [
+    h('button', { class: 'btn ghost', onclick: async () => { closeModal(); select(await act('importBot')); } }, icon('download', 15), ' 파일에서 가져오기'),
+    h('button', { class: 'btn', onclick: closeModal }, '닫기')], 'wide'));
+  search.focus();
 }
 
 function openNewBot() {
-  const state: Look = { shape: Math.floor(Math.random() * SHAPE_COUNT), color: COLORS[10], image: null };
+  const state: Look = { ...crewLook(), image: null };
   const create = h('button', { class: 'btn primary', disabled: true }, '만들기');
   const name: HTMLInputElement = h('input', { class: 'field name', placeholder: 'Bot 이름 입력', oninput: () => { create.disabled = !name.value.trim(); } });
   const { body, look } = profileEditor(state, name);
   create.onclick = async () => {
-    const id = await act('createBot', name.value.trim(), look());
+    const id = await act('createBot', name.value.trim(), look(), true);
     if (id) { closeModal(); ui.tab = 'details'; select(id); }
   };
   openModal(dialog('새 Bot 만들기', body, [h('button', { class: 'btn', onclick: closeModal }, '취소'), create]));
@@ -1170,7 +1341,7 @@ function openNewBot() {
 }
 
 function openAvatarEditor(bot: Bot) {
-  const { body, look } = profileEditor({ shape: shapeOf(bot), color: bot.color, image: bot.image || null });
+  const { body, look } = profileEditor({ shape: shapeOf(bot), color: bot.color, image: bot.image || null, pixels: bot.pixels || null });
   openModal(dialog('프로필 편집', body, [
     h('button', { class: 'btn', onclick: closeModal }, '취소'),
     h('button', { class: 'btn primary', onclick: () => { act('updateBot', bot.id, look()); closeModal(); } }, '저장')]));
@@ -1267,7 +1438,8 @@ function renderTasks() {
   const done = (S.runtime.history || []).map((r) => {
     const c = S.convs.find((x) => x.id === r.convId);
     const bots = r.botIds.map(botById).filter((b): b is Bot => Boolean(b));
-    return h('div', { class: 'task-row' }, bots[0] ? avatar(bots[0], 28) : null,
+    const face = bots[0] ? avatar(bots[0], 28, 'idle') : null;
+    return h('div', { class: 'task-row' }, face && r.ok && !r.stopped ? h('span', { class: 'av-done', title: '완료' }, face, h('span', { class: 'check' }, icon('check', 10))) : face,
       h('div', { class: 'grow' }, h('div', {}, bots.map((b) => b.name).join(', ') || 'Bot', h('span', { class: 'muted' }, ` · ${c ? convTitle(c) : '삭제된 대화'}`)),
         h('div', { class: 'muted small' }, `${r.stopped ? '중지됨' : r.ok ? '완료' : '오류'} · ${ago(r.end - r.start)} 걸림 · ${ago(now - r.end)} 전${r.initiator === 'routine' ? ' · 루틴' : r.initiator === 'bot' || r.initiator === 'routine-bot' ? ' · Bot 요청' : ''}`)),
       c ? h('button', { class: 'btn ghost', onclick: open(r.convId) }, '열기') : null);
@@ -1281,6 +1453,7 @@ function renderTasks() {
 function openConfigure(bot: Bot) {
   const prompt = h('textarea', { class: 'field', style: 'min-height:150px', value: bot.systemPrompt });
   const model = h('select', { class: 'select' }, modelOptions(S.models, `기본값 (${modelName(S.models, S.settings.model)})`).map(([v, l]) => h('option', { value: v, selected: bot.model === v ? true : null }, l)));
+  const fallback = h('select', { class: 'select' }, [['', '없음'] as [string, string], ...modelOptions(S.models, '').filter(([v]) => v)].map(([v, l]) => h('option', { value: v, selected: (bot.fallbackModel || '') === v ? true : null }, l)));
   const skillIds = new Set(bot.skillIds);
   const serverIds = new Set(bot.serverIds);
   const switchRow = (label: string, set: Set<string>, id: string, extra: Child = null) => h('label', { class: 'row', style: 'padding:6px 2px' }, extra, h('span', { class: 'grow' }, label), toggle(set.has(id), (v) => (v ? set.add(id) : set.delete(id))));
@@ -1289,6 +1462,7 @@ function openConfigure(bot: Bot) {
   openModal(dialog(`${bot.name} 설정`, [
     h('div', { class: 'label' }, '역할'), h('div', { class: 'muted small' }, '이 Bot이 무엇을 하는지, 어떻게 일해야 하는지 적어주세요.'), prompt,
     h('div', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'grow' }, '모델'), model),
+    h('div', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'grow' }, '대체 모델', h('div', { class: 'muted small' }, '사용 한도나 요청 제한으로 모델을 쓸 수 없을 때 한 번 대신 써요')), fallback),
     h('label', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'grow' }, '초안', h('div', { class: 'muted small' }, '메일·메시지처럼 외부 앱에 쓰기 전에 고칠 수 있는 초안을 보여줘요')), toggle(drafts, (v) => { drafts = v; })),
     h('h3', {}, '스킬'), skills.length ? skills.map((s) => switchRow(s.name, skillIds, s.id, icon('sparkle', 15))) : h('div', { class: 'muted small' }, '스킬이 없어요. 설정 › 스킬에서 추가하세요.'),
     h('h3', {}, '앱'), S.mcpServers.length ? S.mcpServers.map((s) => switchRow(s.name, serverIds, s.id, h('span', { class: `status ${S.mcpStatus[s.id]?.status || ''}` }))) : h('div', { class: 'muted small' }, h('button', { class: 'btn ghost', onclick: () => { closeModal(); openApps(); } }, '앱 연결하기')),
@@ -1299,7 +1473,7 @@ function openConfigure(bot: Bot) {
       S.bots.length > 1 && !isMain(bot.id) ? h('button', { class: 'btn ghost danger', onclick: () => confirmThen(`${bot.name}을(를) 삭제할까요?`, '이 Bot과의 대화와 루틴이 지워져요.', () => act('deleteBot', bot.id)) }, 'Bot 삭제') : null),
   ], [
     h('button', { class: 'btn', onclick: closeModal }, '취소'),
-    h('button', { class: 'btn primary', onclick: () => { act('updateBot', bot.id, { systemPrompt: prompt.value, model: model.value, drafts, skillIds: [...skillIds], serverIds: [...serverIds] }); closeModal(); } }, '저장')]));
+    h('button', { class: 'btn primary', onclick: () => { act('updateBot', bot.id, { systemPrompt: prompt.value, model: model.value, fallbackModel: fallback.value, drafts, skillIds: [...skillIds], serverIds: [...serverIds] }); closeModal(); } }, '저장')]));
 }
 
 // ---------- wiring ----------
@@ -1310,7 +1484,7 @@ function select(id: string | null | undefined, remember = true): void {
     ui.history.list = [...ui.history.list.slice(0, ui.history.index + 1), id];
     ui.history.index = ui.history.list.length - 1;
   }
-  if (id !== ui.convId) { ui.threadId = null; ui.threadEls = null; ui.keepUnread = null; }
+  if (id !== ui.convId) { ui.threadId = null; ui.threadEls = null; ui.keepUnread = null; ui.exchange = null; }
   ui.convId = id;
   ui.attachments = [];
   ui.skillId = null;
@@ -1415,8 +1589,8 @@ document.addEventListener('click', (e) => {
 
 window.app = { select, getState: () => S };
 initOnboarding({
-  templates: ASSISTANTS,
-  createTeam: async (picked) => { for (const t of picked) await createAssistant(t as (typeof ASSISTANTS)[number]); },
+  templates: TEMPLATES.slice(0, 4),
+  createTeam: async (picked) => { for (const t of picked) await createAssistant(t as BotTemplate); },
   select,
 });
 buildComposer();
@@ -1463,7 +1637,8 @@ function jumpTo(convId: string, m: Message) {
     const list = (S.convs.find((x) => x.id === convId)?.messages || []).filter((x) => x.threadOf === m.threadOf);
     let i = list.findIndex((x) => x.id === m.id);
     while (i > 0 && list[i - 1].viaBotId === m.viaBotId) i--;
-    if (i >= 0) ui.bundles.add(list[i].id);
+    select(convId);
+    if (i >= 0 && !m.threadOf) openExchange([[convId, list[i].id]]);
   }
   select(convId);
   if (m.threadOf) openThread(m.threadOf);

@@ -1,6 +1,6 @@
 # Supabase (free tier) plan
 
-PixelBot keeps everything in `state.json` on the Mac. Supabase adds an optional cloud copy so data survives a reinstall and can move between Macs.
+OCTO CREW keeps everything in `state.json` on the Mac. Supabase adds an optional cloud copy so data survives a reinstall and can move between Macs.
 
 ## What is set up
 

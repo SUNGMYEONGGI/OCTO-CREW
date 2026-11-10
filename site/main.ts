@@ -1,21 +1,23 @@
 // The landing page reuses the app's own avatar renderer (and its pointer-following eyes).
 import { avatarSvg } from '../src/renderer/ui';
 
-const REPO = 'SUNGMYEONGGI/PixelBot';
-const DMG = 'PixelBot-arm64.dmg';
+const REPO = 'SUNGMYEONGGI/OCTO-CREW';
+// Releases from before the rename only carry PixelBot-arm64.dmg (later ones carry both).
+const DMGS = ['OCTO-CREW-arm64.dmg', 'PixelBot-arm64.dmg'];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T | null;
 
 type Member = { name: string; shape: number; color: string; role: string };
+// The OCTO CREW: Octo leads; Drop researches, Fold writes, Gem reviews.
 const CAST: Record<string, Member> = {
-  octo: { name: 'Octo', shape: 0, color: '#a0673b', role: 'main' },
-  mina: { name: 'Mina', shape: 4, color: '#ef3b4b', role: 'comms' },
-  ledger: { name: 'Ledger', shape: 1, color: '#2f7cf6', role: 'budget' },
-  scout: { name: 'Scout', shape: 13, color: '#f26a1b', role: 'research' },
-  pixel: { name: 'Pixel', shape: 3, color: '#8b5cf6', role: 'design' },
-  inbox: { name: 'Inbox', shape: 6, color: '#20b15a', role: 'mail' },
+  octo: { name: 'Octo', shape: 0, color: '#8766e7', role: 'lead' },
+  drop: { name: 'Drop', shape: 1, color: '#59b1ed', role: 'research' },
+  fold: { name: 'Fold', shape: 2, color: '#f6ac80', role: 'writing' },
+  gem: { name: 'Gem', shape: 3, color: '#b4d85f', role: 'review' },
+  mina: { name: 'Mina', shape: 1, color: '#ef3b4b', role: 'comms' },
+  inbox: { name: 'Inbox', shape: 2, color: '#20b15a', role: 'mail' },
 };
-const { octo, mina, ledger, scout, pixel } = CAST;
+const { octo, mina, gem, drop, fold } = CAST;
 
 const avatar = (m: Member, size: number, state = 'idle') =>
   `<span class="avatar" data-st="${state}" style="width:${size}px;height:${size}px;--t0:-${Math.round(Math.random() * 5000)}ms">${avatarSvg(m.shape, m.color, size)}</span>`;
@@ -26,7 +28,7 @@ if (cast) cast.innerHTML = castHtml(84);
 const cast2 = $('cast2');
 if (cast2) cast2.innerHTML = Object.values(CAST).map((m) => avatar(m, 44)).join('');
 const hub = $('hubcast');
-if (hub) hub.innerHTML = [octo, ledger, scout, pixel].map((m) => avatar(m, 30)).join('');
+if (hub) hub.innerHTML = [octo, drop, fold, gem].map((m) => avatar(m, 30)).join('');
 for (const el of document.querySelectorAll<HTMLElement>('[data-av]')) el.innerHTML = avatar(CAST[el.dataset.av!], 26);
 
 // ---------- scripted demo ----------
@@ -34,7 +36,7 @@ for (const el of document.querySelectorAll<HTMLElement>('[data-av]')) el.innerHT
 const side = $('side');
 if (side) {
   const row = (m: Member, on = false) => `<div class="row${on ? ' on' : ''}">${avatar(m, 22)}${m.name}<small>${m.role}</small></div>`;
-  side.innerHTML = `<h4>Groups</h4><div class="row on"><span class="hash">#</span>Launch team</div><h4>Bots</h4>${[octo, ledger, scout, mina, pixel].map((m) => row(m)).join('')}`;
+  side.innerHTML = `<h4>Groups</h4><div class="row on"><span class="hash">#</span>Launch team</div><h4>Bots</h4>${[octo, drop, fold, gem, mina].map((m) => row(m)).join('')}`;
 }
 const msgs = $('thread');
 const tmsgs = $('tmsgs');
@@ -51,11 +53,11 @@ const approval = `<div class="approval"><div class="t"><img src="logos/gmail.svg
 
 const SCRIPT = {
   ask: 'Can we ship the beta on Friday? Check bugs, budget and feedback.',
-  octo1: `On it. ${at('Ledger')} takes the budget, ${at('Scout')} reads the feedback, and I'll go through the bug tracker.`,
-  ledger: 'We have $2,400 left this month. The beta adds about $300 in hosting.',
-  scout: 'Most of the 41 survey answers ask for dark mode. Two people hit the same login loop.',
-  t1: `${at('Pixel')} can you mock the error screen for that loop?`,
-  t2: "Here's a first pass, with a retry button and a clearer message.",
+  octo1: `On it. ${at('Gem')} checks the budget, ${at('Drop')} reads the feedback, and I'll go through the bug tracker.`,
+  gem: 'We have $2,400 left this month. The beta adds about $300 in hosting.',
+  drop: 'Most of the 41 survey answers ask for dark mode. Two people hit the same login loop.',
+  t1: `${at('Fold')} can you write the error message for that loop?`,
+  t2: "Here's a first draft: what went wrong, and a retry button.",
   t3: "Thanks. I'll link it in the feedback summary.",
   mina: 'I drafted the announcement email. It waits for your approval.',
   octo2: 'Friday works if we fix the login loop first. The plan is in the launch doc.',
@@ -68,9 +70,9 @@ function add(el: HTMLElement, html: string): HTMLElement {
 
 function staticDemo() {
   if (!msgs || !tmsgs || !body) return;
-  msgs.innerHTML = [you(SCRIPT.ask), bot(octo, SCRIPT.octo1), bot(scout, SCRIPT.scout, 'idle', '<button class="replies" type="button">3 replies</button>'),
+  msgs.innerHTML = [you(SCRIPT.ask), bot(octo, SCRIPT.octo1), bot(drop, SCRIPT.drop, 'idle', '<button class="replies" type="button">3 replies</button>'),
     bot(mina, SCRIPT.mina, 'idle', approval.replace(/<div class="acts">.*?<\/div><\/div>$/, '<div class="done">Approved once</div></div>')), bot(octo, SCRIPT.octo2, 'idle', file('beta-launch.md'))].join('');
-  tmsgs.innerHTML = [bot(scout, SCRIPT.scout), you(SCRIPT.t1), '<div class="join">Pixel joined the thread</div>', bot(pixel, SCRIPT.t2), bot(scout, SCRIPT.t3)].join('');
+  tmsgs.innerHTML = [bot(drop, SCRIPT.drop), you(SCRIPT.t1), '<div class="join">Fold joined the thread</div>', bot(fold, SCRIPT.t2), bot(drop, SCRIPT.t3)].join('');
   body.classList.add('threaded');
 }
 
@@ -100,22 +102,22 @@ async function play() {
     typing.textContent = '';
     add(msgs, you(SCRIPT.ask));
     await say(msgs, octo, SCRIPT.octo1, { think: 1100 });
-    await say(msgs, ledger, SCRIPT.ledger, { state: 'working', think: 1300 });
-    const sc = await say(msgs, scout, SCRIPT.scout, { state: 'working', think: 1200, extra: '<button class="replies" type="button">Reply in thread</button>' });
+    await say(msgs, gem, SCRIPT.gem, { state: 'working', think: 1300 });
+    const sc = await say(msgs, drop, SCRIPT.drop, { state: 'working', think: 1200, extra: '<button class="replies" type="button">Reply in thread</button>' });
     await wait(700);
 
-    // The thread opens beside the chat; an @mention pulls Pixel in.
+    // The thread opens beside the chat; an @mention pulls Fold in.
     const rep = sc.querySelector<HTMLButtonElement>('.replies')!;
     body.classList.add('threaded');
-    add(tmsgs, bot(scout, SCRIPT.scout));
+    add(tmsgs, bot(drop, SCRIPT.drop));
     await wait(700);
     add(tmsgs, you(SCRIPT.t1));
     rep.textContent = '1 reply';
     await wait(700);
-    add(tmsgs, '<div class="join">Pixel joined the thread</div>');
-    await say(tmsgs, pixel, SCRIPT.t2, { think: 1200 });
+    add(tmsgs, '<div class="join">Fold joined the thread</div>');
+    await say(tmsgs, fold, SCRIPT.t2, { think: 1200 });
     rep.textContent = '2 replies';
-    await say(tmsgs, scout, SCRIPT.t3, { think: 700 });
+    await say(tmsgs, drop, SCRIPT.t3, { think: 700 });
     rep.textContent = '3 replies';
     await wait(900);
 
@@ -181,13 +183,13 @@ if (beams) { new ResizeObserver(drawBeams).observe(beams); document.fonts?.ready
 const LOG: [Member, string, string, string][] = [
   [octo, 'Routine "Morning briefing" started', '', ''],
   [octo, 'mcp__claude_ai_Gmail__search_threads', 'read', 'ok'],
-  [ledger, 'Read budget.xlsx', 'allowed', 'ok'],
-  [scout, 'WebFetch survey results', 'allowed', 'ok'],
-  [scout, 'Write feedback.csv', 'allowed', 'ok'],
+  [gem, 'Read budget.xlsx', 'allowed', 'ok'],
+  [drop, 'WebFetch survey results', 'allowed', 'ok'],
+  [drop, 'Write feedback.csv', 'allowed', 'ok'],
   [mina, 'Gmail draft to beta testers', 'waiting', 'wait'],
   [mina, 'Gmail draft to beta testers', 'approved', 'ok'],
   [octo, 'mcp__characterbot__schedule_routine', 'allowed', 'ok'],
-  [pixel, 'Generate image error-screen.png', 'allowed', 'ok'],
+  [fold, 'Write error-message.md', 'allowed', 'ok'],
   [octo, 'mcp__characterbot__remember', 'allowed', 'ok'],
   [octo, 'Slack post as you', 'blocked', ''],
 ];
@@ -212,7 +214,9 @@ fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
   .then((rel: { tag_name: string; published_at: string; assets: { name: string; size: number }[] } | null) => {
     const el = $('release');
     if (!rel || !el) return;
-    const dmg = rel.assets.find((a) => a.name === DMG);
+    const dmg = DMGS.map((n) => rel.assets.find((a) => a.name === n)).find(Boolean);
+    // Point the download buttons at the file this release actually has.
+    if (dmg) for (const a of document.querySelectorAll<HTMLAnchorElement>('a[href$="-arm64.dmg"]')) a.href = `https://github.com/${REPO}/releases/latest/download/${dmg.name}`;
     const date = new Date(rel.published_at).toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
     const size = dmg ? `, ${Math.round(dmg.size / 1e6)} MB` : '';
     el.innerHTML = `Version ${rel.tag_name.replace(/^v/, '')}, released ${date}${size}. Apple silicon, macOS 12 or later. <a href="https://github.com/${REPO}/releases/tag/${rel.tag_name}">Release notes</a>`;

@@ -15,20 +15,21 @@ import * as oauth from './oauth';
 import * as providers from './providers';
 import * as rename from './rename';
 import * as imagegen from './imagegen';
+import * as update from './update';
 import { pendingPrompt, mentionedBots } from './transcript';
 import os from 'node:os';
 import type { SandboxMode, ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type {
   ActiveRun, Approval, Attachment, Bot, Conv, Effect, Initiator, LoginStatus, McpServer, Message, ModelInfo,
-  Provider, Routine, Rule, RunRecord, Section, Settings, Skill, State,
+  Provider, Routine, Rule, RunRecord, Section, Settings, Skill, State, Usage,
 } from '../shared/types';
 import type { Call } from './gateway';
 import type { ClaudeUsage, GateResult } from './agent';
 import type { Secrets } from './mcp';
 import type { OauthClient, OauthRecord } from './oauth';
 import type { ScheduleInput } from './routines';
-import type { ToolCtx } from './tools';
+import type { NewBot, ToolCtx } from './tools';
 import { readXlsx, type Sheet } from './xlsx';
 import type { Prompt } from './transcript';
 
@@ -42,12 +43,12 @@ type Tag = { threadOf?: string; viaBotId?: string };
 type ApprovalDone = (decision: 'allow' | 'deny' | 'always', args?: Record<string, unknown>) => void;
 
 // `npm start` keeps its data apart from the installed app, so a fresh install
-// starts at first-run setup instead of showing development chats. A v0.1.x
-// CharacterBot folder moves over on first launch.
+// starts at first-run setup instead of showing development chats. A PixelBot
+// (or v0.1.x CharacterBot) folder moves over on first launch.
 {
   const suffix = app.isPackaged ? '' : ' Dev';
-  const dir = path.join(app.getPath('appData'), `PixelBot${suffix}`);
-  rename.moveDataDir(path.join(app.getPath('appData'), `${rename.LEGACY_NAME}${suffix}`), dir);
+  const dir = path.join(app.getPath('appData'), `OCTO CREW${suffix}`);
+  for (const old of rename.LEGACY_NAMES) rename.moveDataDir(path.join(app.getPath('appData'), `${old}${suffix}`), dir);
   app.setPath('userData', dir);
 }
 
@@ -94,6 +95,15 @@ function persist() {
 }
 
 let broadcastTimer: NodeJS.Timeout | undefined;
+// A newer OCTO CREW release, found on launch and once a day (off in settings).
+let appUpdate: update.AppUpdate | null = null;
+async function checkAppUpdate() {
+  if (!state.settings.updateCheck) return;
+  try {
+    appUpdate = await update.check(app.getVersion());
+    broadcast();
+  } catch { /* offline or rate-limited: try again tomorrow */ }
+}
 function broadcast() {
   persist();
   clearTimeout(broadcastTimer);
@@ -115,6 +125,7 @@ function broadcast() {
       legacySecrets: fs.existsSync(legacySecretsFile()) ? (importingLegacy ? 'importing' : 'failed') : null,
       oauthConnected: Object.entries(secrets.__oauth || {}).filter(([, rec]) => rec.tokens).map(([id]) => id),
       hasGoogleClient: Boolean(secrets.__google_client),
+      appUpdate: state.settings.updateCheck ? appUpdate : null,
       providerKeys: state.settings.providers.filter((p) => secrets[`__provider_${p.id}`]).map((p) => p.id),
       claude: claudeStatus,
       chatgpt: chatgptStatus,
@@ -126,8 +137,8 @@ function broadcast() {
 
 // ---------- secrets (encrypted with the OS keychain) ----------
 
-// A secrets.bin this build can't decrypt (CharacterBot 0.1.x used its own
-// Keychain item) is set aside, so new secrets never overwrite it, and imported
+// A secrets.bin this build can't decrypt (PixelBot and CharacterBot used their
+// own Keychain items) is set aside, so new secrets never overwrite it, and imported
 // in the background by importLegacySecrets.
 const legacySecretsFile = () => `${secretsFile()}.${rename.LEGACY_NAME}`;
 function readSecrets(): SecretStore {
@@ -152,7 +163,10 @@ async function mergeLegacySecrets(): Promise<boolean> {
   try {
     text = safeStorage.decryptString(blob);
   } catch {
-    text = rename.decryptLegacy(blob, await rename.legacyPassword());
+    for (const name of rename.LEGACY_NAMES) {
+      text = rename.decryptLegacy(blob, await rename.legacyPassword(name));
+      if (text != null) break;
+    }
   }
   if (text == null) return false;
   const old = JSON.parse(text) as SecretStore;
@@ -403,6 +417,7 @@ function finishTool(conv: Conv, bot: Bot, toolMsg: Message, output: string, isEr
     args: JSON.parse(gateway.maskSecrets(JSON.stringify(toolMsg.args), secretValues)),
     effect: toolMsg.effect || 'allow', outcome: toolMsg.effect === 'deny' ? 'refused' : isError ? 'error' : 'ok',
     output: toolMsg.content.slice(0, 4000),
+    ...(toolMsg.toolCallId ? { callId: toolMsg.toolCallId } : {}), ...(toolMsg.parent ? { parent: toolMsg.parent } : {}),
   });
   if (state.audit.length > 1000) state.audit.splice(0, state.audit.length - 1000);
 }
@@ -476,19 +491,41 @@ async function replayPrompt(conv: Conv, bot: Bot, signal: AbortSignal): Promise<
   return { text: `(앞선 대화 요약)\n${summary.text}\n\n(최근 대화)\n${recent.text}`, images: recent.images };
 }
 
+// Totals for the whole app and per bot and model (설정 › 사용량).
+function countUsage(botId: string, model: string, costUsd: number, inputTokens: number, outputTokens: number): void {
+  const add = (u: Omit<Usage, 'bots'>) => { u.turns += 1; u.costUsd += costUsd; u.inputTokens += inputTokens; u.outputTokens += outputTokens; };
+  add(state.usage);
+  const perBot = ((state.usage.bots ||= {})[botId] ||= {});
+  add(perBot[model || 'default'] ||= { turns: 0, costUsd: 0, inputTokens: 0, outputTokens: 0 });
+}
+
+// A turn that falls back to the bot's fallback model once when its model is down.
+async function turnWithFallback(conv: Conv, bot: Bot, initiator: Initiator, signal: AbortSignal, tag: Tag = {}): Promise<boolean> {
+  if (await botTurn(conv, bot, initiator, signal, tag)) return true;
+  const last = conv.messages.at(-1);
+  const fallback = bot.fallbackModel;
+  if (signal.aborted || !fallback || fallback === (bot.model || state.settings.model) || !last?.modelDown || last.botId !== bot.id) return false;
+  conv.messages.pop();
+  return botTurn(conv, bot, initiator, signal, tag, fallback);
+}
+
 // One bot answers through the Claude Agent SDK. Returns false on error.
 // tag: fields stamped on every message of this turn ({ threadOf } or { viaBotId }).
-async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: AbortSignal, tag: Tag = {}): Promise<boolean> {
+async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: AbortSignal, tag: Tag = {}, modelOverride?: string): Promise<boolean> {
   conv.sessions ||= {};
   const session = conv.sessions[bot.id] || { id: null, cursor: 0 };
+  const cursorBefore = session.cursor;
   // ChatGPT models run on Codex; switching engines starts a new session that
   // gets the whole chat so far.
-  const model = bot.model || state.settings.model;
+  const model = modelOverride || bot.model || state.settings.model;
   const engine: 'codex' | 'claude' = model.startsWith('openai:') ? 'codex' : 'claude';
   if ((session.engine || 'claude') !== engine) Object.assign(session, { id: null, cursor: 0, engine });
   const pending = session.id
     ? pendingPrompt(conv, bot.id, promptOpts(), session.cursor)
     : await replayPrompt(conv, bot, signal);
+  // The last message this prompt covers. Team members can answer at the same
+  // time, so the cursor moves only past what this bot was actually shown.
+  const seenId = conv.messages.at(-1)?.id;
   const { images } = pending;
   // "@Notion" in the chat points the bot at that app, even one it isn't set up with.
   const tagged = state.mcpServers.filter((sv) => sv.enabled && pending.text.toLowerCase().includes(`@${sv.name.toLowerCase()}`));
@@ -508,14 +545,15 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
 
   const toolCtx: ToolCtx = {
     bot, state,
-    messageBot: (name, message) => messageBot(bot, name, message, initiator, conv),
+    messageBot: (name, message, files) => messageBot(bot, name, message, initiator, conv, files),
+    messageBots: (names, message, files) => messageBots(bot, names, message, initiator, conv, files),
     createRoutine: (args) => createRoutine(conv, bot, args),
     webhookUrl: triggers.webhookUrl,
     cancelRoutine: (id) => { const r = state.routines.find((x) => x.id === id && x.convId === conv.id); if (r) r.enabled = false; },
     models: () => [...models, ...openaiModels],
     createBot: (args) => {
       const made = createBotFor(args);
-      greet(bot, made);
+      greet(bot, made, args.greeting);
       return made;
     },
     updateBot: (args) => updateBotFor(args),
@@ -532,7 +570,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
       broadcast();
       return `"${team.name}" 팀원: ${team.botIds.map((id) => findBot(id)?.name).filter(Boolean).join(', ')}`;
     },
-    messageTeam: (name, message, mention) => messageTeam(bot, teamNamed(name), message, mention || [], initiator, conv),
+    messageTeam: (name, message, mention, files) => messageTeam(bot, teamNamed(name), message, mention || [], initiator, conv, files),
     setStatus: (subject, verb) => {
       const a = runtime.active[conv.id];
       if (a?.botId === bot.id) { a.status = { subject: subject.slice(0, 40), verb: verb.slice(0, 20) }; broadcast(); }
@@ -592,8 +630,28 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     if (!msg) byApiId.set(apiId, (msg = newAssistant()));
     return msg;
   };
+  // Sub-agents (Task calls) work out of the chat: their tool calls only go to
+  // the audit log, nested under the Task call (컴퓨터 tab).
+  const subs = new Set<string>(); // Task calls whose sub-agent is working
+  const countSubs = () => { const a = runtime.active[conv.id]; if (a?.botId === bot.id) { a.subagents = subs.size; broadcast(); } };
+  const onSubagent = (m: SDKMessage, parent: string) => {
+    if (!subs.has(parent) && !toolMsgs.get(parent)?.content) { subs.add(parent); countSubs(); }
+    if (m.type === 'assistant') {
+      for (const b of m.message.content) {
+        if (b.type !== 'tool_use') continue;
+        toolMsgs.set(b.id, { id: store.id('msg'), role: 'tool', botId: bot.id, toolCallId: b.id, name: b.name, args: (b.input || {}) as Record<string, unknown>, content: '', ts: Date.now(), effect: decisions.get(b.id), parent });
+      }
+    }
+    if (m.type === 'user' && Array.isArray(m.message?.content)) {
+      for (const b of m.message.content) {
+        if (typeof b === 'string' || b.type !== 'tool_result') continue;
+        const toolMsg = toolMsgs.get(b.tool_use_id);
+        if (toolMsg) finishTool(conv, bot, toolMsg, agent.resultText(b.content), Boolean(b.is_error), initiator, secretValues);
+      }
+    }
+  };
   const onMessage = (m: SDKMessage) => {
-    if ('parent_tool_use_id' in m && m.parent_tool_use_id) return; // subagent traffic stays inside its Task call
+    if ('parent_tool_use_id' in m && m.parent_tool_use_id) return onSubagent(m, m.parent_tool_use_id);
     if (m.type === 'system' && m.subtype === 'init') session.id = m.session_id;
     if (m.type === 'stream_event') {
       const ev = m.event;
@@ -625,16 +683,14 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
         if (typeof b === 'string' || b.type !== 'tool_result') continue;
         const toolMsg = toolMsgs.get(b.tool_use_id);
         if (toolMsg) finishTool(conv, bot, toolMsg, agent.resultText(b.content), Boolean(b.is_error), initiator, secretValues);
+        if (subs.delete(b.tool_use_id)) countSubs();
       }
       broadcast();
     }
     if (m.type === 'result') {
       session.id = m.session_id;
       const u = m.usage;
-      state.usage.turns += 1;
-      state.usage.costUsd += m.total_cost_usd || 0;
-      state.usage.inputTokens += (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-      state.usage.outputTokens += u.output_tokens || 0;
+      countUsage(bot.id, model, m.total_cost_usd || 0, (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0), u.output_tokens || 0);
       if (m.subtype !== 'success') failure = m.errors.join('\n') || m.subtype;
       else if (m.is_error) failure = m.result || m.subtype;
     }
@@ -688,9 +744,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
       if (ev.type === 'turn.failed') failure = ev.error.message;
       if (ev.type === 'error') failure = ev.message;
       if (ev.type === 'turn.completed') {
-        state.usage.turns += 1;
-        state.usage.inputTokens += ev.usage.input_tokens + ev.usage.cached_input_tokens;
-        state.usage.outputTokens += ev.usage.output_tokens;
+        countUsage(bot.id, model, 0, ev.usage.input_tokens + ev.usage.cached_input_tokens, ev.usage.output_tokens);
       }
       if (!('item' in ev)) return;
       const it = ev.item;
@@ -740,10 +794,14 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
   // The SDK also sends an error as an assistant message; keep only the error entry below.
   const failed = failure as string | null; // assigned inside callbacks
   if (failed) conv.messages = conv.messages.filter((m) => !(m.role === 'assistant' && m.botId === bot.id && m.content && failed.includes(m.content.trim())));
-  session.cursor = conv.messages.length;
+  const seen = conv.messages.findIndex((m) => m.id === seenId);
+  session.cursor = seenId && seen >= 0 ? seen + 1 : seenId ? conv.messages.length : 0;
+  // A model that couldn't run never read the prompt: the retry sends it again.
+  const down = Boolean(failed && agent.modelDown(failed));
+  if (down && session.engine === (model.startsWith('openai:') ? 'codex' : 'claude')) session.cursor = Math.min(cursorBefore, session.cursor);
   conv.sessions[bot.id] = session;
   if (failed) {
-    conv.messages.push({ id: store.id('msg'), role: 'assistant', botId: bot.id, content: '', error: failed.replace(/^Claude Code returned an error result: /, ''), ts: Date.now(), ...tag });
+    conv.messages.push({ id: store.id('msg'), role: 'assistant', botId: bot.id, content: '', error: failed.replace(/^Claude Code returned an error result: /, ''), ts: Date.now(), ...(down ? { modelDown: true } : {}), ...tag });
   } else {
     const last = [...conv.messages].reverse().find((m) => m.botId === bot.id && (m.content || m.card));
     const card = last?.card;
@@ -762,8 +820,9 @@ function notify(bot: Bot, body: string | undefined): void {
 
 // Runs the responders in order; in a group, a reply that @mentions another
 // member hands the conversation to it (bounded so bots can't loop forever).
-async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: Tag = {}): Promise<boolean> {
+async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: Tag = {}, parallel = false): Promise<boolean> {
   if (runtime.running.has(conv.id)) return false;
+  if (parallel) return respondTogether(conv, botIds, initiator);
   const controller = new AbortController();
   runtime.running.set(conv.id, controller);
   runtime.started[conv.id] = Date.now();
@@ -778,7 +837,7 @@ async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: 
       const before = conv.messages.length;
       runtime.active[conv.id] = { botId: bot.id, phase: 'thinking', queue, ...tag }; // queue: bots still to answer
       ran.add(bot.id);
-      ok = (await botTurn(conv, bot, initiator, controller.signal, tag)) && ok;
+      ok = (await turnWithFallback(conv, bot, initiator, controller.signal, tag)) && ok;
       if (conv.kind !== 'group' && !tag.threadOf) continue;
       const reply = conv.messages.slice(before).filter((m) => m.role === 'assistant').map((m) => m.content).join('\n');
       const members = (tag.threadOf ? state.bots : conv.botIds.map(findBot).filter(isBot)).filter((b) => b.id !== bot.id);
@@ -786,6 +845,46 @@ async function respond(conv: Conv, botIds: string[], initiator: Initiator, tag: 
     }
   } finally {
     runtime.history = [{ convId: conv.id, botIds: [...ran], initiator, start: runtime.started[conv.id], end: Date.now(), ok: ok && !controller.signal.aborted, stopped: controller.signal.aborted }, ...runtime.history].slice(0, 30);
+    delete runtime.started[conv.id];
+    runtime.running.delete(conv.id);
+    delete runtime.active[conv.id];
+    touch(conv);
+    broadcast();
+  }
+  return ok;
+}
+
+// Team members asked by another bot (message_team) answer at the same time,
+// a few at once; no @mention handoffs.
+const TOGETHER = 3;
+async function respondTogether(conv: Conv, botIds: string[], initiator: Initiator): Promise<boolean> {
+  const controller = new AbortController();
+  runtime.running.set(conv.id, controller);
+  runtime.started[conv.id] = Date.now();
+  const queue = botIds.filter((id) => findBot(id));
+  const working: string[] = [];
+  const show = () => {
+    if (working.length) runtime.active[conv.id] = { botId: working[0], phase: runtime.active[conv.id]?.phase || 'thinking', delegates: working.slice(1), queue };
+    broadcast();
+  };
+  let ok = true;
+  const worker = async () => {
+    for (let id = queue.shift(); id && !controller.signal.aborted; id = queue.shift()) {
+      working.push(id);
+      show();
+      try {
+        ok = (await turnWithFallback(conv, getBot(id), initiator, controller.signal)) && ok;
+      } finally {
+        working.splice(working.indexOf(id), 1);
+        show();
+      }
+    }
+  };
+  const ran = [...queue];
+  try {
+    await Promise.all(Array.from({ length: Math.min(TOGETHER, queue.length) }, worker));
+  } finally {
+    runtime.history = [{ convId: conv.id, botIds: ran, initiator, start: runtime.started[conv.id], end: Date.now(), ok: ok && !controller.signal.aborted, stopped: controller.signal.aborted }, ...runtime.history].slice(0, 30);
     delete runtime.started[conv.id];
     runtime.running.delete(conv.id);
     delete runtime.active[conv.id];
@@ -819,7 +918,31 @@ function threadBots(conv: Conv, rootId: string): string[] {
 // A bot DMs another bot (mcp__characterbot__message_bot): the message lands in the
 // target's chat, the target answers there, and the answer goes back as the tool
 // result. One hop only, so two bots can't keep each other busy.
-async function messageBot(from: Bot, name: string, text: string, initiator: Initiator, fromConv: Conv): Promise<string> {
+// Files a bot hands over (attachments of message_bot / message_bots / message_team):
+// checked to be inside the sender's workspace, then copied into each receiver's
+// received/ folder under the same name.
+const MAX_HANDOFF = 20 * 1024 * 1024;
+function handFiles(from: Bot, paths: string[] = [], to: string[]): Attachment[] {
+  if (!paths.length) return [];
+  if (!to.length) throw new Error('파일을 받을 Bot이 없어요');
+  return paths.map((p) => {
+    const src = tools.inside(workspace(from.id), p);
+    const st = fs.statSync(src, { throwIfNoEntry: false });
+    if (!st?.isFile()) throw new Error(`"${p}" 파일이 작업 폴더에 없어요`);
+    if (st.size > MAX_HANDOFF) throw new Error(`"${p}" 파일이 20MB보다 커요`);
+    const { name: stem, ext } = path.parse(src);
+    let rel = path.join('received', `${stem}${ext}`);
+    for (let n = 2; to.some((id) => fs.existsSync(path.join(workspace(id), rel))); n++) rel = path.join('received', `${stem} (${n})${ext}`);
+    for (const id of to) {
+      const dest = tools.inside(workspace(id), rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(src, dest, fs.constants.COPYFILE_EXCL);
+    }
+    return { name: path.basename(rel), path: rel, botId: to[0] };
+  });
+}
+
+async function messageBot(from: Bot, name: string, text: string, initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
   if (initiator === 'bot' || initiator === 'routine-bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 또 다른 Bot에게 보낼 수 없어요');
   const others = state.bots.filter((b) => b.id !== from.id);
   const target = others.find((b) => b.name.toLowerCase() === name.trim().replace(/^@/, '').toLowerCase());
@@ -831,11 +954,12 @@ async function messageBot(from: Bot, name: string, text: string, initiator: Init
     if (Date.now() > until) throw new Error(`${target.name}이(가) 계속 다른 일을 하고 있어요. 나중에 다시 보내세요`);
     await new Promise((r) => setTimeout(r, 1000));
   }
+  const attachments = handFiles(from, files, [target.id]);
   const start = dm.messages.length;
   // Shown as "A, B 및 C 작업 중…" in the conversation that handed the work out.
   const active = runtime.active[fromConv.id];
   if (active) active.delegates = [...(active.delegates || []), target.id];
-  dm.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, viaBotId: from.id });
+  dm.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, viaBotId: from.id, attachments });
   touch(dm);
   try {
     await respond(dm, [target.id], initiator === 'routine' ? 'routine-bot' : 'bot', { viaBotId: from.id });
@@ -845,6 +969,21 @@ async function messageBot(from: Bot, name: string, text: string, initiator: Init
   }
   const reply = dm.messages.slice(start).filter((m) => m.role === 'assistant' && (m.content || m.error)).map((m) => m.content || `오류: ${m.error}`).join('\n\n');
   return reply || `${target.name}이(가) 답하지 않았어요`;
+}
+
+// The same task to several bots at once (message_bots), each in its own DM.
+async function messageBots(from: Bot, names: string[], text: string, initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
+  const targets = [...new Set(names.map((n) => n.trim()).filter(Boolean))];
+  if (targets.length < 2) throw new Error('Bot을 2개 이상 고르세요. 하나면 message_bot을 쓰세요');
+  const replies: string[] = new Array(targets.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < targets.length; i = next++) {
+      replies[i] = await messageBot(from, targets[i], text, initiator, fromConv, files).catch((err: Error) => `오류: ${err.message}`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(TOGETHER, targets.length) }, worker));
+  return targets.map((name, i) => `[${name}] ${replies[i]}`).join('\n\n');
 }
 
 // Bots and teams made by a bot (create_bot / create_team), like Grok Bot's
@@ -863,12 +1002,14 @@ function teamNamed(name: string): Conv {
   if (!team) throw new Error(`"${name}" 팀이 없어요. 있는 팀: ${teams.map((c) => c.name).join(', ') || '없음'}`);
   return team;
 }
-function createBotFor({ name, role, instructions, model }: { name: string; role: string; instructions?: string; model?: string }): Bot {
+function createBotFor({ name, role, instructions, model, color, shape }: NewBot): Bot {
   if (!name.trim()) throw new Error('이름이 필요해요');
+  if (color && !/^#[0-9a-f]{6}$/i.test(color)) throw new Error('color는 #rrggbb 형식이어야 해요');
   if (state.bots.some(byName(name))) throw new Error(`"${name}" Bot이 이미 있어요`);
   const known = [...models, ...openaiModels];
   if (model && !known.some((m) => m.value === model)) throw new Error(`모르는 모델이에요. list_models의 value 중에서 고르세요`);
-  const bot = getBot(findConv(actions.createBot(name.trim())).botIds[0]);
+  const look = { ...(color ? { color } : {}), ...(shape !== undefined ? { shape } : {}) };
+  const bot = getBot(findConv(actions.createBot(name.trim(), look)).botIds[0]);
   Object.assign(bot, {
     label: role.trim().slice(0, 80),
     model: model || '',
@@ -888,14 +1029,15 @@ function updateBotFor({ name, role, instructions, model }: { name: string; role?
   return bot;
 }
 
-// Like Grok Bot, a Bot made by another Bot says hello first. The maker's note
-// stays folded under the greeting as "보낸 사람 [maker]".
-function greet(from: Bot, bot: Bot): void {
+// Like Grok Bot, a new Bot says hello first. A maker Bot's note stays folded
+// under the greeting as "보낸 사람 [maker]"; without a maker the note is hidden.
+function greet(from: Bot | null, bot: Bot, note?: string): void {
   const dm = state.convs.find((c) => c.kind === 'dm' && c.botIds[0] === bot.id);
   if (!dm) return;
+  const ask = `${state.settings.userName}님에게 먼저 인사하고, 맡은 역할로 무엇을 해 줄 수 있는지와 시작하려면 무엇이 필요한지 2~4문장으로 말하세요. 도구는 쓰지 마세요.`;
   dm.messages.push({
-    id: store.id('msg'), role: 'user', ts: Date.now(), fromBotId: from.id, brief: true,
-    content: `${from.name}이(가) 당신을 만들었어요. ${state.settings.userName}님에게 먼저 인사하고, 맡은 역할로 무엇을 해 줄 수 있는지와 시작하려면 무엇이 필요한지 2~4문장으로 말하세요. 도구는 쓰지 마세요.`,
+    id: store.id('msg'), role: 'user', ts: Date.now(), brief: true, ...(from ? { fromBotId: from.id } : {}),
+    content: note?.trim() ? `${note.trim().slice(0, 500)}\n\n(${ask})` : `${from ? `${from.name}이(가)` : `${state.settings.userName}님이`} 당신을 만들었어요. ${ask}`,
   });
   touch(dm);
   void respond(dm, [bot.id], 'bot');
@@ -903,7 +1045,7 @@ function greet(from: Bot, bot: Bot): void {
 
 // A bot posts to a team chat (message_team); the mentioned members, or all of
 // them, answer there and their replies come back as the tool result.
-async function messageTeam(from: Bot, team: Conv, text: string, mention: string[], initiator: Initiator, fromConv: Conv): Promise<string> {
+async function messageTeam(from: Bot, team: Conv, text: string, mention: string[], initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
   if (initiator === 'bot' || initiator === 'routine-bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 팀에 보낼 수 없어요');
   const members = team.botIds.filter((id) => id !== from.id);
   const targets = mention.length ? botsNamed(mention).map((b) => b.id).filter((id) => members.includes(id)) : members;
@@ -912,13 +1054,14 @@ async function messageTeam(from: Bot, team: Conv, text: string, mention: string[
     if (Date.now() > until) throw new Error(`"${team.name}" 팀이 계속 다른 일을 하고 있어요`);
     await new Promise((r) => setTimeout(r, 1000));
   }
+  const attachments = handFiles(from, files, members); // every member reads the team chat
   const start = team.messages.length;
   const active = runtime.active[fromConv.id];
   if (active) active.delegates = [...(active.delegates || []), ...targets];
-  team.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id });
+  team.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, attachments });
   touch(team);
   try {
-    await respond(team, targets, initiator === 'routine' ? 'routine-bot' : 'bot');
+    await respond(team, targets, initiator === 'routine' ? 'routine-bot' : 'bot', {}, true);
   } finally {
     if (active) active.delegates = (active.delegates || []).filter((id) => !targets.includes(id));
     broadcast();
@@ -1109,6 +1252,18 @@ function readAttachment(file: string): Attachment {
 
 const actions = {
   // extra: { threadOf } for a thread reply, { voice } for a voice memo.
+  // "다른 모델로 다시 시도" on a model error: the bot keeps the new model.
+  retryWithModel(convId: string, msgId: string, model: string) {
+    const conv = findConv(convId);
+    const i = conv.messages.findIndex((m) => m.id === msgId && m.modelDown);
+    if (i < 0) throw new Error('다시 시도할 오류가 없어요');
+    if (runtime.running.has(conv.id)) throw new Error('지금 다른 Bot이 답하는 중이에요');
+    if (model && ![...models, ...openaiModels].some((m) => m.value === model)) throw new Error('모르는 모델이에요');
+    const [failed] = conv.messages.splice(i, 1);
+    const bot = getBot(failed.botId as string);
+    bot.model = model;
+    void respond(conv, [bot.id], 'user', { ...(failed.threadOf ? { threadOf: failed.threadOf } : {}), ...(failed.viaBotId ? { viaBotId: failed.viaBotId } : {}) });
+  },
   send(convId: string, content: string, attachments: Attachment[] = [], skillId: string | null = null, extra: Partial<Message> = {}) {
     const conv = findConv(convId);
     postUserMessage(conv, { content, attachments, skillId, ...extra });
@@ -1181,13 +1336,15 @@ const actions = {
     state.skills = state.skills.filter((s) => s.id !== id);
     for (const bot of state.bots) bot.skillIds = bot.skillIds.filter((x) => x !== id);
   },
-  createBot(name?: string, look: Partial<Bot> = {}): string {
+  // hello: the new Bot greets the user first (the + menu's 새 Bot).
+  createBot(name?: string, look: Partial<Bot> = {}, hello = false): string {
     const bot: Bot = { ...store.newBot(name || `Bot ${state.bots.length + 1}`, state.bots.length), ...withImageColor(look) };
     bot.serverIds = state.mcpServers.map((s) => s.id);
     bot.skillIds = state.skills.map((s) => s.id);
     state.bots.push(bot);
     const conv = store.newConv('dm', [bot.id]);
     state.convs.push(conv);
+    if (hello) greet(null, bot);
     return conv.id;
   },
   updateBot(id: string, patch: Partial<Bot>) {
@@ -1286,6 +1443,7 @@ const actions = {
       if (response !== 0) for (const k of ['blockAccountWrites', 'autoReview', 'computerAccess'] as const) delete clean[k];
     }
     Object.assign(state.settings, clean);
+    if (clean.updateCheck) void checkAppUpdate();
     if (clean.theme) nativeTheme.themeSource = clean.theme; // native menus, scrollbars, dialogs
   },
   // ----- LLM providers (settings › 모델) -----
@@ -1647,7 +1805,7 @@ function createWindow() {
     height: 960,
     minWidth: 960,
     minHeight: 600,
-    title: 'PixelBot',
+    title: 'OCTO CREW',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 18, y: 18 },
     // plugins: Chromium's PDF viewer, for PDFs in the library viewer.
@@ -1675,6 +1833,8 @@ app.whenReady().then(() => {
   createWindow();
   void importLegacySecrets();
   setInterval(tickRoutines, 30_000);
+  void checkAppUpdate();
+  setInterval(checkAppUpdate, 24 * 60 * 60_000);
   syncTriggers();
 });
 app.on('before-quit', () => {

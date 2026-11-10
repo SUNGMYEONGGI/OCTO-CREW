@@ -12,6 +12,8 @@ import { substitute, toSdkConfig } from '../src/main/mcp';
 import * as providers from '../src/main/providers';
 import * as rename from '../src/main/rename';
 import * as xlsx from '../src/main/xlsx';
+import * as update from '../src/main/update';
+import { modelDown } from '../src/main/agent';
 import { searchMessages } from '../src/shared/search';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -102,6 +104,8 @@ assert.match(p1.text, /^명기: hi[\s\S]*note[\s\S]*\[RO\]: from b2$/);
 assert.deepEqual(p1.images, [{ mediaType: 'image/png', data: 'AAA=' }]);
 assert.equal(pendingPrompt(conv, 'b1', { bots, userName: '명기' }, 3).text, '');
 assert.equal(pendingPrompt({ kind: 'dm', messages: [msg({ role: 'user', content: 'yo' })] }, 'b1', { bots, userName: '명기' }).text, 'yo');
+// A file another Bot handed over is pointed to by its path in the receiver's workspace.
+assert.match(pendingPrompt({ kind: 'dm', messages: [msg({ role: 'user', content: '봐줘', fromBotId: 'b2', attachments: [{ name: 'a.pdf', path: 'received/a.pdf', botId: 'b1' }] })] }, 'b1', { bots, userName: '명기' }).text, /첨부 파일 a\.pdf: 작업 폴더의 received\/a\.pdf$/);
 assert.deepEqual(mentionedBots('@RO 그리고 @RO Agent 확인', bots), ['b2', 'b1']);
 assert.deepEqual(mentionedBots('@ro agent만', bots), ['b1']);
 
@@ -218,7 +222,7 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
 
 // Relative and disguised paths from the Bot's workspace still count (#61, #64).
 {
-  const data = '/Users/a/Library/Application Support/PixelBot';
+  const data = '/Users/a/Library/Application Support/OCTO CREW';
   const w = { cwd: `${data}/workspaces/bot_1`, dataDir: data, home: '/Users/a' };
   const yes = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), true, JSON.stringify(args));
   const no = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), false, JSON.stringify(args));
@@ -229,6 +233,8 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   yes('Read', { file_path: `${w.cwd}/../../state.json` });
   yes('Write', { file_path: '../../bin/stt', content: 'x' });
   yes('Bash', { command: 'cat ~/Library/Application\\ Support/PixelBot/state.json' });
+  yes('Bash', { command: 'cat ~/Library/Application\\ Support/OCTO\\ CREW/state.json' });
+  yes('Read', { file_path: '/Users/a/Library/Application Support/OCTO CREW/../OCTO CREW/state.json' });
   yes('Bash', { command: 'cat ~/.ss?/id_rsa' });
   yes('Bash', { command: 'cat $HOME/.ssh/id_rsa' });
   yes('Read', { file_path: '/users/a/library/application support/pixelbot/STATE.json' });
@@ -280,14 +286,44 @@ const xlsxDone = (async () => {
   assert.deepEqual(xlsx.sheetParts('<sheet name="S" r:id="r1"/>', '<Relationship Id="r1" Target="../../etc/x.xml"/>'), []);
 })();
 
-// Pixel avatars render for every shape and size.
+// The crew avatars render for every shape and size; old saves (shapes 4–13) fold onto them; hand-drawn bodies stay pixels.
 (globalThis as unknown as { document: unknown }).document = { addEventListener() {} };
 // require, not import: ui.ts touches document when it loads.
 const ui = require('../src/renderer/ui') as typeof import('../src/renderer/ui');
 for (let i = 0; i < ui.SHAPE_COUNT; i++) for (const size of [18, 40, 96]) {
   const svg = ui.avatarSvg(i, '#2f7cf6', size);
-  assert.ok(svg.includes('crispEdges') && (svg.match(/class="eye"/g) || []).length === 2, `shape ${i}`);
+  assert.ok(svg.includes('<path d="M') && (svg.match(/class="eye"/g) || []).length === 2, `shape ${i}`);
+}
+assert.equal(ui.SHAPE_COUNT, 4);
+assert.ok(ui.avatarSvg(13, '#2f7cf6', 40).includes('class="eye"'));
+assert.ok(ui.avatarSvg(0, '#2f7cf6', 40, { pixels: '1'.repeat(256) }).includes('crispEdges'));
+assert.ok(ui.avatarSvg(0, '"><script>', 40).includes('#999999'));
+{
+  const a = ui.avatarSvg(0, '#2f7cf6', 40).match(/id="(avg\d+)l"/)?.[1];
+  const b = ui.avatarSvg(0, '#2f7cf6', 40).match(/id="(avg\d+)l"/)?.[1];
+  assert.ok(a && b && a !== b, 'gradient ids are unique per avatar');
 }
 assert.ok(!ui.avatarSvg(0, '#999', 40, { sleeping: true }).includes('class="eye"'));
 
-xlsxDone.then(() => console.log('ok'));
+// New-version check: compares major.minor.patch and links only to this repo's releases.
+assert.ok(update.newer('v0.3.1', '0.3.0') && update.newer('0.10.0', '0.9.9') && update.newer('1.0.0', '0.99.0'));
+assert.ok(!update.newer('v0.3.0', '0.3.0') && !update.newer('0.2.9', '0.3.0'));
+const release = (body: object, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+const updateDone = (async () => {
+  const url = 'https://github.com/SUNGMYEONGGI/OCTO-CREW/releases/tag/v0.4.0';
+  assert.deepStrictEqual(await update.check('0.3.0', release({ tag_name: 'v0.4.0', html_url: url })), { version: '0.4.0', url });
+  assert.strictEqual(await update.check('0.4.0', release({ tag_name: 'v0.4.0', html_url: url })), null);
+  assert.strictEqual((await update.check('0.3.0', release({ tag_name: 'v0.4.0', html_url: 'https://evil.example/x' })))?.url, 'https://github.com/SUNGMYEONGGI/OCTO-CREW/releases/latest');
+  await assert.rejects(update.check('0.3.0', release({}, 403)));
+})();
+
+// Errors that another model might get past.
+assert.equal(modelDown('API Error: 429 {"type":"rate_limit_error"}'), true);
+assert.equal(modelDown('Credit balance is too low'), true);
+assert.equal(modelDown("You've hit your usage limit"), true);
+assert.equal(modelDown('model: claude-x not_found_error'), true);
+assert.equal(modelDown("There's an issue with the selected model (claude-x). It may not exist or you may not have access to it."), true);
+assert.equal(modelDown('중지됨'), false);
+assert.equal(modelDown('ENOENT: no such file'), false);
+
+Promise.all([xlsxDone, updateDone]).then(() => console.log('ok'));
