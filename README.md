@@ -297,7 +297,7 @@ npm run dist       # build, then dist/OCTO-CREW-arm64.dmg and OCTO-CREW-<version
 
 ### Releasing
 
-Releases are continuous. Every push to `main` that changes the app runs `.github/workflows/release.yml` on `macos-14`:
+Releases are continuous. Every push to `main` that changes the app runs `.github/workflows/release.yml` on `macos-15`:
 
 1. type-check, test and build,
 2. set the version to `<major>.<minor>.<run number>` from `package.json` (for example `0.1.7`), so you never bump it by hand,
