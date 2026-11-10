@@ -1,4 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1024 1024">
-  <defs><clipPath id="r"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath></defs>
-  <image href="source.png" x="100" y="100" width="824" height="824" clip-path="url(#r)" preserveAspectRatio="xMidYMid slice"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- OCTO CREW app icon: Octo on the crew's ivory. Regenerate with the avatar renderer in src/renderer/ui.ts. -->
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fdf9f2"/><stop offset="1" stop-color="#f5ecdd"/></linearGradient>
+  <radialGradient id="sh" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#5a4a7a" stop-opacity=".28"/><stop offset="1" stop-color="#5a4a7a" stop-opacity="0"/></radialGradient></defs>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <ellipse cx="512" cy="760" rx="250" ry="34" fill="url(#sh)"/>
+  <svg x="212" y="190" width="600" height="600" viewBox="0 0 100 100" overflow="visible"><defs><radialGradient id="avg1l" cx=".32" cy=".22" r=".7"><stop offset="0" stop-color="#fff" stop-opacity=".34"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient><radialGradient id="avg1s" cx=".3" cy=".25" r=".95"><stop offset=".55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".2"/></radialGradient></defs><g class="av-body"><path d="M11 55C11 27 29 10 50 10S89 27 89 55C89 61 91 65 93 69C97 80 92 90 81 90C73 90 68 85 66 80C64 88 58 92 50 92S36 88 34 80C32 85 27 90 19 90C8 90 3 80 7 69C9 65 11 61 11 55Z" fill="#8766e7"/><path d="M11 55C11 27 29 10 50 10S89 27 89 55C89 61 91 65 93 69C97 80 92 90 81 90C73 90 68 85 66 80C64 88 58 92 50 92S36 88 34 80C32 85 27 90 19 90C8 90 3 80 7 69C9 65 11 61 11 55Z" fill="url(#avg1s)"/><path d="M11 55C11 27 29 10 50 10S89 27 89 55C89 61 91 65 93 69C97 80 92 90 81 90C73 90 68 85 66 80C64 88 58 92 50 92S36 88 34 80C32 85 27 90 19 90C8 90 3 80 7 69C9 65 11 61 11 55Z" fill="url(#avg1l)"/><g class="av-look"><ellipse class="eye" cx="40" cy="48" rx="3.9" ry="6.2" fill="#22222c"/><ellipse class="eye" cx="60" cy="48" rx="3.9" ry="6.2" fill="#22222c"/></g></g></svg>
 </svg>

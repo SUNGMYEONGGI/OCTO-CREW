@@ -1,4 +1,5 @@
-// v0.2.0 renamed CharacterBot to PixelBot. These move a v0.1.x install over once.
+// v0.2.0 renamed CharacterBot to PixelBot, and PixelBot became OCTO CREW. These
+// move an older install over once.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -6,6 +7,8 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 
 export const LEGACY_NAME = 'CharacterBot';
+// Older names, newest first.
+export const LEGACY_NAMES = ['PixelBot', LEGACY_NAME];
 
 // Claude Code keeps sessions under ~/.claude/projects/<cwd with every
 // non-alphanumeric character turned into "-">.
@@ -49,11 +52,11 @@ export function decryptLegacy(blob: Buffer, password: string | null): string | n
   }
 }
 
-// Reads the old Keychain password without blocking the app; macOS asks the user
-// once to let PixelBot read the CharacterBot item.
-export function legacyPassword(): Promise<string | null> {
+// Reads an old Keychain password without blocking the app; macOS asks the user
+// once to let OCTO CREW read the PixelBot (or CharacterBot) item.
+export function legacyPassword(name = LEGACY_NAME): Promise<string | null> {
   if (process.platform !== 'darwin') return Promise.resolve(null);
   return new Promise((resolve) => {
-    execFile('security', ['find-generic-password', '-w', '-s', `${LEGACY_NAME} Safe Storage`], { timeout: 120000 }, (err, out) => resolve(err ? null : String(out).trim()));
+    execFile('security', ['find-generic-password', '-w', '-s', `${name} Safe Storage`], { timeout: 120000 }, (err, out) => resolve(err ? null : String(out).trim()));
   });
 }

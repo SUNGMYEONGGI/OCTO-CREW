@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="build/icon.png" width="128" alt="PixelBot icon">
+<img src="build/icon.png" width="128" alt="OCTO CREW icon">
 
-# PixelBot
+# OCTO CREW
 
 **A team of AI coworkers that lives on your Mac and runs on the subscriptions you already pay for.** Give each Bot a name, a personality, a model, a memory and a folder of its own, then talk to them the way you talk to people: in DMs, in groups and in threads.
 
@@ -19,9 +19,9 @@ Claude Bots run on the Claude Agent SDK with your Claude login. ChatGPT Bots and
 
 </div>
 
-> **Alpha, and a personal project.** PixelBot is early. It has been exercised by hand, not evaluated on real workloads. Expect rough edges, and read [Security model](#security-model) and [Limitations](#limitations) before you point it at anything that matters.
+> **Alpha, and a personal project.** OCTO CREW is early. It has been exercised by hand, not evaluated on real workloads. Expect rough edges, and read [Security model](#security-model) and [Limitations](#limitations) before you point it at anything that matters.
 
-> **Your subscriptions, your machine.** PixelBot signs in through the Claude Code and Codex logins on this computer. It never asks for your password, never ships an OAuth client of its own for those logins, and keeps every conversation, memory and file under `~/Library/Application Support`.
+> **Your subscriptions, your machine.** OCTO CREW signs in through the Claude Code and Codex logins on this computer. It never asks for your password, never ships an OAuth client of its own for those logins, and keeps every conversation, memory and file under `~/Library/Application Support`.
 
 > **The UI is in Korean.** Labels and the Bots' default instructions are written in Korean. The Bots answer in whatever language you write to them.
 
@@ -31,7 +31,7 @@ A desktop chat app in which every contact is an agent. A fresh install starts wi
 
 Each Bot is configuration, not code:
 
-- a **name, label, color and avatar** (shapes, or a profile icon generated with ChatGPT),
+- a **name, label, color and avatar**: one of the OCTO CREW characters (Octo, Drop, Fold, Gem) in any color, a hand-drawn pixel body, or a profile icon generated with ChatGPT,
 - a **system prompt** that sets its role and personality,
 - a **model**: any Claude model your subscription offers, or a ChatGPT model through Codex,
 - **skills** it can load on demand and **MCP servers** it may use,
@@ -70,23 +70,23 @@ The quickest way installs the latest release into Applications and opens it:
 curl -fsSL https://sungmyeonggi.github.io/PixelBot/install.sh | sh
 ```
 
-Files downloaded with `curl` carry no quarantine flag, so macOS doesn't show the "Apple could not verify PixelBot" warning. The script is [`site/install.sh`](site/install.sh).
+Files downloaded with `curl` carry no quarantine flag, so macOS doesn't show the "Apple could not verify OCTO CREW" warning. The script is [`site/install.sh`](site/install.sh).
 
 To install by hand instead:
 
 1. Download [`PixelBot-arm64.dmg`](https://github.com/SUNGMYEONGGI/PixelBot/releases/latest/download/PixelBot-arm64.dmg), the latest release (or pick one from [Releases](https://github.com/SUNGMYEONGGI/PixelBot/releases)).
-2. Drag **PixelBot** to Applications.
+2. Drag **OCTO CREW** to Applications.
 3. Builds without a Developer ID signature are ad-hoc signed, so Gatekeeper stops the first launch. Open System Settings › **Privacy & Security** and click **Open Anyway**, or run:
 
    ```sh
-   xattr -dr com.apple.quarantine /Applications/PixelBot.app
+   xattr -dr com.apple.quarantine "/Applications/OCTO CREW.app"
    ```
 
 ### From source
 
 ```sh
 git clone https://github.com/SUNGMYEONGGI/PixelBot.git
-cd PixelBot
+cd PixelBot   # the repository keeps its old name
 npm install
 npm start      # builds into out/ and launches Electron
 ```
@@ -200,7 +200,7 @@ The tools every Bot gets from the app, on top of the file, shell and web tools o
 
 Everything is set in the app; there is no `.env`. What is stored where:
 
-| Path (under `~/Library/Application Support/PixelBot/`) | Contents |
+| Path (under `~/Library/Application Support/OCTO CREW/`) | Contents |
 | --- | --- |
 | `state.json` | Settings, Bots, chats, memories, skills, routines, rules, activity log, usage. |
 | `secrets.bin` | Tokens and keys, encrypted with `safeStorage`. |
@@ -282,14 +282,14 @@ Builds use [electron-builder](https://www.electron.build); the configuration is 
 npm run typecheck  # tsc, no output files
 npm test           # unit tests (tsx)
 npm run build      # esbuild: out/main.cjs, out/preload.cjs, out/renderer/
-npm run dist       # build, then dist/PixelBot-arm64.dmg and PixelBot-<version>-arm64-mac.zip
+npm run dist       # build, then dist/OCTO-CREW-arm64.dmg and OCTO-CREW-<version>-arm64-mac.zip
 ```
 
 | Item | Value |
 | --- | --- |
 | App ID | `com.sungmyeonggi.characterbot` |
 | Targets | `dmg`, `zip`, arm64 |
-| Icon | `build/icon.icns`, made from `build/source.png` |
+| Icon | `build/icon.icns`, made from `build/icon.svg` (Octo) |
 | Packaged files | `out/**` (without source maps) and `package.json`; Node dependencies of the main process from `node_modules` |
 | Unpacked from asar | the Claude Code binary, the Codex binary, `out/stt.swift`, so they can run |
 | Signing | Developer ID when `CSC_LINK` is set; otherwise `build/adhoc-sign.cjs` signs ad hoc so Apple Silicon will run it |
@@ -304,7 +304,7 @@ Releases are continuous. Every push to `main` that changes the app runs `.github
 3. package the `.dmg` and `.zip`,
 4. publish them as GitHub Release `v<version>` with notes generated from the commits, marked latest.
 
-The download button on the website and in this README links to `releases/latest/download/PixelBot-arm64.dmg`, so it always serves the newest build. Changes to `site/` or Markdown files alone don't cut a release. To start a new minor line, change `version` in `package.json` (for example to `0.2.0`). You can also run the workflow by hand from the Actions tab.
+The download button on the website and in this README links to `releases/latest/download/PixelBot-arm64.dmg`, so it always serves the newest build. Each release carries the DMG as `OCTO-CREW-arm64.dmg` and, for links from before the rename, as `PixelBot-arm64.dmg`. Changes to `site/` or Markdown files alone don't cut a release. To start a new minor line, change `version` in `package.json` (for example to `0.2.0`). You can also run the workflow by hand from the Actions tab.
 
 ### Website
 
@@ -337,7 +337,7 @@ iconutil -c icns icon.iconset -o icon.icns && rm -r icon.iconset
 rsvg-convert -w 1024 -h 1024 icon.svg -o icon.png
 ```
 
-`icon.svg` clips `source.png` to the macOS rounded square; replace `source.png` to change the art.
+`icon.svg` is Octo, drawn by the app's avatar renderer (`avatarSvg` in `src/renderer/ui.ts`) on the macOS rounded square.
 
 ## Development
 
@@ -348,7 +348,7 @@ npm run typecheck
 npm test
 ```
 
-Running from source stores data in `~/Library/Application Support/PixelBot Dev`; the installed app uses `PixelBot`, so a fresh install starts at the first-run setup (account sign-in, name, starter team, first task).
+Running from source stores data in `~/Library/Application Support/OCTO CREW Dev`; the installed app uses `OCTO CREW` (an older `PixelBot` or `CharacterBot` folder moves over on first launch), so a fresh install starts at the first-run setup (account sign-in, name, starter team, first task).
 
 Optional cloud backup on Supabase: see [docs/supabase.md](docs/supabase.md).
 
@@ -372,7 +372,7 @@ Every change needs `npm run build` (which `npm start` runs) and a restart. Pull 
 
 ## Acknowledgements
 
-- PixelBot is an independent project, not affiliated with or endorsed by Anthropic or OpenAI.
+- OCTO CREW is an independent project, not affiliated with or endorsed by Anthropic or OpenAI.
 - The gateway and routine limits borrow from [CopilotKit OpenBot](https://github.com/CopilotKit/OpenBot).
 - Logos in the app catalog belong to their services and are used only to identify them.
 

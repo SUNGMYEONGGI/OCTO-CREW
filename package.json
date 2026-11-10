@@ -1,6 +1,6 @@
 {
   "name": "characterbot",
-  "productName": "PixelBot",
+  "productName": "OCTO CREW",
   "version": "0.3.1",
   "description": "Desktop AI bot team on your own Claude and ChatGPT subscriptions",
   "author": "SUNGMYEONGGI",
@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "com.sungmyeonggi.characterbot",
-    "productName": "PixelBot",
+    "productName": "OCTO CREW",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -32,6 +32,7 @@
       "node_modules/@openai/codex-*/**"
     ],
     "mac": {
+      "artifactName": "OCTO-CREW-${version}-${arch}-mac.${ext}",
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
       "target": [
@@ -47,8 +48,8 @@
       }
     },
     "dmg": {
-      "title": "PixelBot",
-      "artifactName": "${productName}-${arch}.${ext}"
+      "title": "OCTO CREW",
+      "artifactName": "OCTO-CREW-${arch}.${ext}"
     },
     "publish": {
       "provider": "github",

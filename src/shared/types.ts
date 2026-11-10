@@ -247,7 +247,7 @@ export interface Settings {
   fullAccess: boolean;
   blockAccountWrites: boolean;
   micId: string; // '' = the system default microphone
-  updateCheck: boolean; // look for a newer PixelBot release on launch and daily
+  updateCheck: boolean; // look for a newer OCTO CREW release on launch and daily
   onboarded: boolean; // first-run setup (accounts, name, team) finished
   mainBotId?: string;
 }

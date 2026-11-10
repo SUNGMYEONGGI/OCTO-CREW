@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import type { Bot, Conv, State } from '../shared/types';
 
-const COLORS = ['#f7931a', '#ef3b4b', '#20b15a', '#f26a1b', '#2f7cf6', '#8b5cf6', '#111111'];
+// The OCTO CREW colors first: Octo, Drop, Fold, Gem.
+const COLORS = ['#8766e7', '#59b1ed', '#f6ac80', '#b4d85f', '#ef3b4b', '#20b15a', '#2f7cf6'];
 const id = (prefix: string): string => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 function newBot(name: string, index: number): Bot {
@@ -10,7 +11,7 @@ function newBot(name: string, index: number): Bot {
     name,
     label: '',
     color: COLORS[index % COLORS.length],
-    shape: index % 14,
+    shape: index % 4,
     systemPrompt: `You are ${name}, a helpful agent. Answer in the user's language.`,
     model: '',
     skillIds: [],

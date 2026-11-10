@@ -60,9 +60,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - name: Publish release
         run: |
-          (cd dist && shasum -a 256 PixelBot-arm64.dmg > PixelBot-arm64.dmg.sha256)
+          # PixelBot-arm64.dmg is the same file under the old name, so links and
+          # install.sh copies from before the OCTO CREW rename keep working.
+          cd dist
+          cp OCTO-CREW-arm64.dmg PixelBot-arm64.dmg
+          for f in OCTO-CREW-arm64.dmg PixelBot-arm64.dmg; do shasum -a 256 "$f" > "$f.sha256"; done
           gh release create "v${{ steps.version.outputs.version }}" \
-            dist/PixelBot-arm64.dmg dist/PixelBot-arm64.dmg.sha256 dist/*.zip dist/*.blockmap dist/latest-mac.yml \
-            --target "$GITHUB_SHA" --title "PixelBot ${{ steps.version.outputs.version }}" --generate-notes --latest
+            OCTO-CREW-arm64.dmg OCTO-CREW-arm64.dmg.sha256 PixelBot-arm64.dmg PixelBot-arm64.dmg.sha256 *.zip *.blockmap latest-mac.yml \
+            --target "$GITHUB_SHA" --title "OCTO CREW ${{ steps.version.outputs.version }}" --generate-notes --latest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

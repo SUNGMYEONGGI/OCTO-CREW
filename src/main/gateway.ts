@@ -46,7 +46,7 @@ const SENSITIVE = [
   /\.kube\/config\b/, /\.config\/(gh|gcloud|characterbot)\b/, /\.claude\.json\b/, /\.codex\/auth\.json/, /codex\/auth\.json/,
   /Library\/Keychains\b/, /\bsecurity\s+(find-(generic|internet)-password|dump-keychain|export|unlock-keychain)\b/, /Library\/Cookies\b/,
   /Library\/Application Support\/(Google\/Chrome|BraveSoftware|Microsoft Edge|Arc|Firefox|Vivaldi|com\.operasoftware)/, /Library\/Safari\b/, /Library\/Messages\b/, /Library\/Mail\b/,
-  /\bsecrets\.bin\b/, /Application Support\/(PixelBot|CharacterBot)( Dev)?\/state\.json/,
+  /\bsecrets\.bin\b/, /Application Support\/(OCTO CREW|PixelBot|CharacterBot)( Dev)?\/state\.json/,
 ];
 // Where the Bot runs: its workspace sits inside the app's data folder, so a
 // relative path (../../state.json) reaches the app's own files.
