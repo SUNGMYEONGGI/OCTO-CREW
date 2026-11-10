@@ -43,12 +43,12 @@ type Tag = { threadOf?: string; viaBotId?: string };
 type ApprovalDone = (decision: 'allow' | 'deny' | 'always', args?: Record<string, unknown>) => void;
 
 // `npm start` keeps its data apart from the installed app, so a fresh install
-// starts at first-run setup instead of showing development chats. A v0.1.x
-// CharacterBot folder moves over on first launch.
+// starts at first-run setup instead of showing development chats. A PixelBot
+// (or v0.1.x CharacterBot) folder moves over on first launch.
 {
   const suffix = app.isPackaged ? '' : ' Dev';
-  const dir = path.join(app.getPath('appData'), `PixelBot${suffix}`);
-  rename.moveDataDir(path.join(app.getPath('appData'), `${rename.LEGACY_NAME}${suffix}`), dir);
+  const dir = path.join(app.getPath('appData'), `OCTO CREW${suffix}`);
+  for (const old of rename.LEGACY_NAMES) rename.moveDataDir(path.join(app.getPath('appData'), `${old}${suffix}`), dir);
   app.setPath('userData', dir);
 }
 
@@ -95,7 +95,7 @@ function persist() {
 }
 
 let broadcastTimer: NodeJS.Timeout | undefined;
-// A newer PixelBot release, found on launch and once a day (off in settings).
+// A newer OCTO CREW release, found on launch and once a day (off in settings).
 let appUpdate: update.AppUpdate | null = null;
 async function checkAppUpdate() {
   if (!state.settings.updateCheck) return;
@@ -137,8 +137,8 @@ function broadcast() {
 
 // ---------- secrets (encrypted with the OS keychain) ----------
 
-// A secrets.bin this build can't decrypt (CharacterBot 0.1.x used its own
-// Keychain item) is set aside, so new secrets never overwrite it, and imported
+// A secrets.bin this build can't decrypt (PixelBot and CharacterBot used their
+// own Keychain items) is set aside, so new secrets never overwrite it, and imported
 // in the background by importLegacySecrets.
 const legacySecretsFile = () => `${secretsFile()}.${rename.LEGACY_NAME}`;
 function readSecrets(): SecretStore {
@@ -163,7 +163,10 @@ async function mergeLegacySecrets(): Promise<boolean> {
   try {
     text = safeStorage.decryptString(blob);
   } catch {
-    text = rename.decryptLegacy(blob, await rename.legacyPassword());
+    for (const name of rename.LEGACY_NAMES) {
+      text = rename.decryptLegacy(blob, await rename.legacyPassword(name));
+      if (text != null) break;
+    }
   }
   if (text == null) return false;
   const old = JSON.parse(text) as SecretStore;
@@ -1802,7 +1805,7 @@ function createWindow() {
     height: 960,
     minWidth: 960,
     minHeight: 600,
-    title: 'PixelBot',
+    title: 'OCTO CREW',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 18, y: 18 },
     // plugins: Chromium's PDF viewer, for PDFs in the library viewer.

@@ -1,28 +1,31 @@
 #!/bin/sh
-# Installs the latest PixelBot into /Applications.
+# Installs the latest OCTO CREW into /Applications.
 # curl downloads carry no quarantine flag, so Gatekeeper doesn't block the unsigned build.
 set -eu
-[ "$(uname -s)" = Darwin ] || { echo "PixelBot runs on macOS only." >&2; exit 1; }
-[ "$(uname -m)" = arm64 ] || { echo "PixelBot needs a Mac with Apple silicon." >&2; exit 1; }
+[ "$(uname -s)" = Darwin ] || { echo "OCTO CREW runs on macOS only." >&2; exit 1; }
+[ "$(uname -m)" = arm64 ] || { echo "OCTO CREW needs a Mac with Apple silicon." >&2; exit 1; }
 
-URL=https://github.com/SUNGMYEONGGI/PixelBot/releases/latest/download/PixelBot-arm64.dmg
+LATEST=https://github.com/SUNGMYEONGGI/PixelBot/releases/latest/download
 TMP=$(mktemp -d)
 MNT="$TMP/mnt"
 trap 'hdiutil detach -quiet "$MNT" 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
-echo "Downloading PixelBot..."
-curl -fL --progress-bar "$URL" -o "$TMP/PixelBot.dmg"
+echo "Downloading OCTO CREW..."
+# Releases before the rename only have PixelBot-arm64.dmg.
+URL="$LATEST/OCTO-CREW-arm64.dmg"
+curl -fL --progress-bar "$URL" -o "$TMP/app.dmg" || { URL="$LATEST/PixelBot-arm64.dmg"; curl -fL --progress-bar "$URL" -o "$TMP/app.dmg"; }
 # The release publishes the DMG's SHA-256 next to it; refuse a download that doesn't match.
-curl -fsL "$URL.sha256" -o "$TMP/PixelBot.dmg.sha256" || { echo "Couldn't download the checksum." >&2; exit 1; }
-[ "$(shasum -a 256 "$TMP/PixelBot.dmg" | cut -d' ' -f1)" = "$(cut -d' ' -f1 "$TMP/PixelBot.dmg.sha256")" ] || { echo "Checksum mismatch: the download is damaged or was changed." >&2; exit 1; }
-hdiutil attach -quiet -nobrowse -mountpoint "$MNT" "$TMP/PixelBot.dmg"
+curl -fsL "$URL.sha256" -o "$TMP/app.dmg.sha256" || { echo "Couldn't download the checksum." >&2; exit 1; }
+[ "$(shasum -a 256 "$TMP/app.dmg" | cut -d' ' -f1)" = "$(cut -d' ' -f1 "$TMP/app.dmg.sha256")" ] || { echo "Checksum mismatch: the download is damaged or was changed." >&2; exit 1; }
+hdiutil attach -quiet -nobrowse -mountpoint "$MNT" "$TMP/app.dmg"
+APP=$(ls -d "$MNT"/*.app | head -n 1)
+NAME=$(basename "$APP")
 
-osascript -e 'quit app "PixelBot"' 2>/dev/null || true
-# PixelBot was called CharacterBot before v0.2.0; it moves the old data over on first launch.
-osascript -e 'quit app "CharacterBot"' 2>/dev/null || true
-rm -rf /Applications/PixelBot.app /Applications/CharacterBot.app
-ditto "$MNT/PixelBot.app" /Applications/PixelBot.app
-xattr -dr com.apple.quarantine /Applications/PixelBot.app 2>/dev/null || true
+# OCTO CREW was called PixelBot, and CharacterBot before v0.2.0; it moves the old data over on first launch.
+for old in "OCTO CREW" PixelBot CharacterBot; do osascript -e "quit app \"$old\"" 2>/dev/null || true; done
+rm -rf "/Applications/OCTO CREW.app" /Applications/PixelBot.app /Applications/CharacterBot.app
+ditto "$APP" "/Applications/$NAME"
+xattr -dr com.apple.quarantine "/Applications/$NAME" 2>/dev/null || true
 
-echo "Installed to /Applications/PixelBot.app"
-open /Applications/PixelBot.app
+echo "Installed to /Applications/$NAME"
+open "/Applications/$NAME"

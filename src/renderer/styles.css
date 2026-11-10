@@ -402,28 +402,16 @@ a.btn { color: var(--base); text-decoration: none; }
 .group + .group { margin-top: 12px; }
 .picker-btn { text-align: left; min-width: 190px; }
 
-/* ---------- animated avatars (idle, thinking, streaming, working, blocked, finished) ---------- */
+/* ---------- avatars: still while they work (the status line says what they do); eyes blink and follow the pointer ---------- */
 .avatar svg .av-body, .avatar svg .av-look, .avatar svg .eye { transform-box: view-box; transform-origin: 50px 55px; }
 .avatar svg .av-look { transition: transform .25s ease-out; }
 .avatar svg .eye { transform-box: fill-box; transform-origin: center; animation: av-blink 5.2s infinite; animation-delay: var(--t0, 0s); }
-.avatar.img { transform-origin: 50% 80%; }
-.avatar[data-st="thinking"] .av-body, .avatar.img[data-st="thinking"] { animation: av-sway 1.8s ease-in-out infinite; animation-delay: var(--t0, 0s); }
-.avatar[data-st="thinking"] .av-look { transform: translate(-3px, -4px); animation: av-ponder 2.4s ease-in-out infinite; }
-.avatar[data-st="streaming"] .av-body, .avatar.img[data-st="streaming"] { animation: av-nod .55s ease-in-out infinite; }
-.avatar[data-st="working"] .av-body, .avatar.img[data-st="working"] { animation: av-bob 1.1s ease-in-out infinite; animation-delay: var(--t0, 0s); }
-.avatar[data-st="working"] .av-look { animation: av-scan 1.4s ease-in-out infinite; }
-.avatar[data-st="blocked"] .av-body, .avatar.img[data-st="blocked"] { transform: rotate(-9deg); animation: av-wait 2.6s ease-in-out infinite; }
+.avatar[data-st="thinking"] .av-look { transform: translate(-2px, -3px); }
 .avatar[data-st="blocked"] .eye { animation: none; transform: scaleY(.55); }
-.avatar[data-st="finished"] .av-body, .avatar.img[data-st="finished"] { animation: av-hop .9s cubic-bezier(.3,1.6,.5,1) 1; }
-.avatar[data-st="finished"] .eye { animation: none; transform: scaleY(.45); }
 @keyframes av-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
-@keyframes av-sway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
-@keyframes av-ponder { 0%, 100% { transform: translate(-3px, -4px); } 50% { transform: translate(3px, -4px); } }
-@keyframes av-nod { 0%, 100% { transform: translateY(0) rotate(0); } 40% { transform: translateY(-5px) rotate(-3deg); } }
-@keyframes av-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-@keyframes av-scan { 0%, 100% { transform: translate(-5px, 1px); } 50% { transform: translate(5px, 1px); } }
-@keyframes av-wait { 0%, 100% { transform: rotate(-9deg); } 50% { transform: rotate(-4deg); } }
-@keyframes av-hop { 0% { transform: translateY(0) scale(1); } 30% { transform: translateY(-12px) scale(1.05, .95); } 60% { transform: translateY(0) scale(1.06, .92); } 100% { transform: translateY(0) scale(1); } }
+/* A finished task in 백그라운드 작업 gets a small check on its Bot. */
+.av-done { position: relative; display: inline-flex; flex: none; }
+.av-done .check { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%; display: grid; place-items: center; background: #20b15a; color: #fff; box-shadow: 0 0 0 2px var(--pane); }
 @media (prefers-reduced-motion: reduce) { .avatar *, .avatar.img { animation: none !important; } }
 .typing-dots { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .typing-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); opacity: .35; animation: dot-pulse 1.2s ease-in-out infinite; animation-delay: var(--t0, 0s); }

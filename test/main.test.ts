@@ -222,7 +222,7 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
 
 // Relative and disguised paths from the Bot's workspace still count (#61, #64).
 {
-  const data = '/Users/a/Library/Application Support/PixelBot';
+  const data = '/Users/a/Library/Application Support/OCTO CREW';
   const w = { cwd: `${data}/workspaces/bot_1`, dataDir: data, home: '/Users/a' };
   const yes = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), true, JSON.stringify(args));
   const no = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), false, JSON.stringify(args));
@@ -233,6 +233,8 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   yes('Read', { file_path: `${w.cwd}/../../state.json` });
   yes('Write', { file_path: '../../bin/stt', content: 'x' });
   yes('Bash', { command: 'cat ~/Library/Application\\ Support/PixelBot/state.json' });
+  yes('Bash', { command: 'cat ~/Library/Application\\ Support/OCTO\\ CREW/state.json' });
+  yes('Read', { file_path: '/Users/a/Library/Application Support/OCTO CREW/../OCTO CREW/state.json' });
   yes('Bash', { command: 'cat ~/.ss?/id_rsa' });
   yes('Bash', { command: 'cat $HOME/.ssh/id_rsa' });
   yes('Read', { file_path: '/users/a/library/application support/pixelbot/STATE.json' });
@@ -284,13 +286,22 @@ const xlsxDone = (async () => {
   assert.deepEqual(xlsx.sheetParts('<sheet name="S" r:id="r1"/>', '<Relationship Id="r1" Target="../../etc/x.xml"/>'), []);
 })();
 
-// Pixel avatars render for every shape and size.
+// The crew avatars render for every shape and size; old saves (shapes 4–13) fold onto them; hand-drawn bodies stay pixels.
 (globalThis as unknown as { document: unknown }).document = { addEventListener() {} };
 // require, not import: ui.ts touches document when it loads.
 const ui = require('../src/renderer/ui') as typeof import('../src/renderer/ui');
 for (let i = 0; i < ui.SHAPE_COUNT; i++) for (const size of [18, 40, 96]) {
   const svg = ui.avatarSvg(i, '#2f7cf6', size);
-  assert.ok(svg.includes('crispEdges') && (svg.match(/class="eye"/g) || []).length === 2, `shape ${i}`);
+  assert.ok(svg.includes('<path d="M') && (svg.match(/class="eye"/g) || []).length === 2, `shape ${i}`);
+}
+assert.equal(ui.SHAPE_COUNT, 4);
+assert.ok(ui.avatarSvg(13, '#2f7cf6', 40).includes('class="eye"'));
+assert.ok(ui.avatarSvg(0, '#2f7cf6', 40, { pixels: '1'.repeat(256) }).includes('crispEdges'));
+assert.ok(ui.avatarSvg(0, '"><script>', 40).includes('#999999'));
+{
+  const a = ui.avatarSvg(0, '#2f7cf6', 40).match(/id="(avg\d+)l"/)?.[1];
+  const b = ui.avatarSvg(0, '#2f7cf6', 40).match(/id="(avg\d+)l"/)?.[1];
+  assert.ok(a && b && a !== b, 'gradient ids are unique per avatar');
 }
 assert.ok(!ui.avatarSvg(0, '#999', 40, { sleeping: true }).includes('class="eye"'));
 

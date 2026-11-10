@@ -1,4 +1,4 @@
-// "Is there a newer PixelBot?" Reads the latest GitHub release; nothing is
+// "Is there a newer OCTO CREW?" Reads the latest GitHub release; nothing is
 // downloaded or installed (the build is unsigned, so the user installs by hand).
 
 export const RELEASES = 'https://api.github.com/repos/SUNGMYEONGGI/PixelBot/releases/latest';

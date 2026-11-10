@@ -5,7 +5,7 @@ import { openSettings, renderSettings, planUsage, refreshUsage, confirmLogout, S
 import { openApps, renderApps, serverTile } from './apps';
 import {
   h, fill, $, act, icon, avatar, avatarSvg, userAvatar, editing, toast, openModal, closeModal, modalOpen,
-  toggle, popover, relativeDay, shapeOf, shapeMask, SHAPE_COUNT, modelName, modelOptions, setAvatarState,
+  toggle, popover, relativeDay, shapeOf, shapeMask, SHAPE_COUNT, CREW_COLORS, modelName, modelOptions, setAvatarState,
   type Child, type MenuItem,
 } from './ui';
 import { searchMessages } from '../shared/search';
@@ -34,7 +34,9 @@ const ui: {
 
 type Suggestion = { label: string; apply: () => void; icon?: string; hint?: string; bot?: Bot; tile?: HTMLElement; status?: string; kind?: string };
 
-const COLORS = ['#111111', '#a0673b', '#ef3b4b', '#f26a1b', '#f7931a', '#20b15a', '#15b8a6', '#2f7cf6', '#8b5cf6', '#ec4899', '#8e8e8e'];
+// A random crew member in its own color.
+const crewLook = () => { const shape = Math.floor(Math.random() * SHAPE_COUNT); return { shape, color: CREW_COLORS[shape] }; };
+const COLORS = ['#8766e7', '#59b1ed', '#f6ac80', '#b4d85f', '#111111', '#a0673b', '#ef3b4b', '#f26a1b', '#f7931a', '#20b15a', '#15b8a6', '#2f7cf6', '#8b5cf6', '#ec4899', '#8e8e8e'];
 const botById = (id: string | undefined) => S.bots.find((b) => b.id === id);
 const conv = () => S.convs.find((c) => c.id === ui.convId);
 // The chat views only render while a conversation is selected.
@@ -1260,7 +1262,7 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
     fill(body, seg, h('div', { class: 'studio' }, face, nameField,
       ready ? [drop, file, note,
         h('button', { class: 'btn soft', disabled: busy ? true : null, onclick: generate }, icon('sparkle', 15), busy ? ' 생성 중… (1분 정도)' : state.image ? ' 다시 생성' : ' 프로필 생성'),
-        h('div', { class: 'muted small' }, 'ChatGPT 구독으로 PixelBot 스타일 프로필 아이콘을 만들어요.')]
+        h('div', { class: 'muted small' }, 'ChatGPT 구독으로 OCTO CREW 스타일 프로필 아이콘을 만들어요.')]
         : [h('div', { class: 'muted small', style: 'text-align:center' }, 'AI 프로필은 ChatGPT 구독으로 만들어요.'),
           h('button', { class: 'btn soft', onclick: () => { closeModal(); openSettings('general'); } }, icon('openai', 15), ' ChatGPT 연결')]));
   };
@@ -1269,7 +1271,7 @@ function profileEditor(state: Look, nameField: HTMLElement | null = null) {
 }
 
 const createAssistant = (t: BotTemplate) =>
-  act('createAssistant', t.name, { shape: Math.floor(Math.random() * SHAPE_COUNT), color: COLORS[Math.floor(Math.random() * COLORS.length)], label: t.description,
+  act('createAssistant', t.name, { ...crewLook(), label: t.description,
     systemPrompt: `${t.prompt}\n\n${t.category === '비서' ? ASSISTANT_RULES : '사용자의 언어로 답하세요.'}` }, t.routines);
 
 async function createFromTemplate(t: BotTemplate) {
@@ -1311,7 +1313,7 @@ function openGallery() {
 }
 
 function openNewBot() {
-  const state: Look = { shape: Math.floor(Math.random() * SHAPE_COUNT), color: COLORS[10], image: null };
+  const state: Look = { ...crewLook(), image: null };
   const create = h('button', { class: 'btn primary', disabled: true }, '만들기');
   const name: HTMLInputElement = h('input', { class: 'field name', placeholder: 'Bot 이름 입력', oninput: () => { create.disabled = !name.value.trim(); } });
   const { body, look } = profileEditor(state, name);
@@ -1421,7 +1423,8 @@ function renderTasks() {
   const done = (S.runtime.history || []).map((r) => {
     const c = S.convs.find((x) => x.id === r.convId);
     const bots = r.botIds.map(botById).filter((b): b is Bot => Boolean(b));
-    return h('div', { class: 'task-row' }, bots[0] ? avatar(bots[0], 28) : null,
+    const face = bots[0] ? avatar(bots[0], 28, 'idle') : null;
+    return h('div', { class: 'task-row' }, face && r.ok && !r.stopped ? h('span', { class: 'av-done', title: '완료' }, face, h('span', { class: 'check' }, icon('check', 10))) : face,
       h('div', { class: 'grow' }, h('div', {}, bots.map((b) => b.name).join(', ') || 'Bot', h('span', { class: 'muted' }, ` · ${c ? convTitle(c) : '삭제된 대화'}`)),
         h('div', { class: 'muted small' }, `${r.stopped ? '중지됨' : r.ok ? '완료' : '오류'} · ${ago(r.end - r.start)} 걸림 · ${ago(now - r.end)} 전${r.initiator === 'routine' ? ' · 루틴' : r.initiator === 'bot' || r.initiator === 'routine-bot' ? ' · Bot 요청' : ''}`)),
       c ? h('button', { class: 'btn ghost', onclick: open(r.convId) }, '열기') : null);
