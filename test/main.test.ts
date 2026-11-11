@@ -187,6 +187,28 @@ assert.equal(gateway.accountWrite('mcp__characterbot__remember'), false);
   assert.equal(rename.decryptLegacy(blob, 'wrong'), null);
 }
 
+// v0.4.0: PixelBot moves to "OCTO CREW" (a path with a space); with both old folders
+// present the newer one wins and CharacterBot is left alone (#91).
+{
+  const root = path.join(tmp, 'rename2');
+  const pixel = path.join(root, 'PixelBot');
+  const legacy = path.join(root, 'CharacterBot');
+  const to = path.join(root, 'OCTO CREW');
+  const projects = path.join(root, 'projects');
+  const key = (p: string) => p.replace(/[^a-zA-Z0-9]/g, '-');
+  for (const d of [pixel, legacy]) {
+    fs.mkdirSync(path.join(d, 'workspaces', 'bot_a'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify({ dir: path.join(d, 'workspaces', 'bot_a') }));
+  }
+  fs.mkdirSync(path.join(projects, `${key(pixel)}-workspaces-bot-a`), { recursive: true });
+  assert.deepEqual(rename.LEGACY_NAMES, ['PixelBot', 'CharacterBot']);
+  const moved = rename.LEGACY_NAMES.map((n) => rename.moveDataDir(path.join(root, n), to, projects));
+  assert.deepEqual(moved, [true, false]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(to, 'state.json'), 'utf8')), { dir: path.join(to, 'workspaces', 'bot_a') });
+  assert.ok(fs.existsSync(legacy));
+  assert.deepEqual(fs.readdirSync(projects), [`${key(to)}-workspaces-bot-a`]);
+}
+
 // Workspace paths can't escape through symlinks; runnable files are detected.
 {
   const ws = path.join(tmp, 'ws');
