@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import type { McpServer, Message, Provider, Rule } from '../src/shared/types';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'characterbot-test-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'octocrew-test-'));
 
 // store: defaults, round trip, legacy migration
 const file = path.join(tmp, 'state.json');
@@ -27,6 +27,16 @@ assert.equal(store.load(file).bots[0].name, 'Octo');
 const s = store.defaultState();
 store.save(file, s);
 assert.deepEqual(store.load(file), s);
+// v0.4.1: rules and audit entries saved under the old app tool prefix load under the new one (#97).
+{
+  const old = structuredClone(s);
+  old.rules = [{ id: 'r1', tool: 'mcp__characterbot__update_bot', effect: 'allow' }];
+  fs.writeFileSync(file, JSON.stringify(old));
+  const loaded = store.load(file);
+  assert.equal(JSON.stringify(loaded).includes('mcp__characterbot__'), false);
+  assert.equal(loaded.rules[0].tool, 'mcp__octocrew__update_bot');
+  store.save(file, s);
+}
 fs.writeFileSync(file, JSON.stringify({ settings: { baseUrl: 'x' }, agents: [{ id: 'a1', name: 'RO', color: '#f00', systemPrompt: 'p', messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'yo' }] }] }));
 const migrated = store.load(file);
 assert.equal(migrated.bots[0].id, 'a1');
@@ -42,7 +52,7 @@ const call = { name: 'Bash', args: { command: 'rm -rf /' }, botId: 'b1' };
 assert.equal(gateway.decide(call).effect, 'allow');
 assert.equal(gateway.decide(call, [], { Bash: 'ask' }).effect, 'ask');
 assert.equal(gateway.decide({ ...call, name: 'Read' }).effect, 'allow');
-assert.equal(gateway.decide({ ...call, name: 'mcp__characterbot__ask_user' }).effect, 'allow');
+assert.equal(gateway.decide({ ...call, name: 'mcp__octocrew__ask_user' }).effect, 'allow');
 assert.equal(gateway.decide({ ...call, name: 'mcp__github__create_issue' }).effect, 'ask');
 assert.equal(gateway.decide({ ...call, name: 'Write', args: { file_path: 'out/a.md' } }).effect, 'allow');
 assert.equal(gateway.decide({ ...call, name: 'Write', args: { file_path: '/etc/hosts' } }).effect, 'allow');
@@ -162,7 +172,7 @@ assert.equal(gateway.accountWrite('mcp__claude_ai_Gmail__send_email'), true);
 assert.equal(gateway.accountWrite('mcp__claude_ai_Slack__slack_search_public'), false);
 assert.equal(gateway.accountWrite('mcp__linear__create_issue', ['linear']), true);
 assert.equal(gateway.accountWrite('mcp__echo__post_note', ['linear']), false);
-assert.equal(gateway.accountWrite('mcp__characterbot__remember'), false);
+assert.equal(gateway.accountWrite('mcp__octocrew__remember'), false);
 
 // rename: a v0.1.x CharacterBot folder moves to PixelBot with its paths and Claude sessions.
 {
