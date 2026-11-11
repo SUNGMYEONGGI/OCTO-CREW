@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import type { Bot, Conv, State } from '../shared/types';
+import { APP_TOOLS, LEGACY_APP_TOOLS, type Bot, type Conv, type State } from '../shared/types';
 
 // The OCTO CREW colors first: Octo, Drop, Fold, Gem.
 const COLORS = ['#8766e7', '#59b1ed', '#f6ac80', '#b4d85f', '#ef3b4b', '#20b15a', '#2f7cf6'];
@@ -84,7 +84,9 @@ function migrate(raw: any): State {
 
 function load(file: string): State {
   try {
-    return migrate(JSON.parse(fs.readFileSync(file, 'utf8')));
+    // v0.4.1 renamed the app's tools (mcp__characterbot__* -> mcp__octocrew__*): saved
+    // rules, audit entries and tool steps follow.
+    return migrate(JSON.parse(fs.readFileSync(file, 'utf8').split(LEGACY_APP_TOOLS).join(APP_TOOLS)));
   } catch {
     return defaultState();
   }

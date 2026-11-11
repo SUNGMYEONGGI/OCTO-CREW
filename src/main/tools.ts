@@ -1,5 +1,5 @@
 // App-specific tools exposed to the Claude agent through an in-process MCP
-// server (`mcp__characterbot__*`). File, shell and web tools come from the SDK.
+// server (`mcp__octocrew__*`). File, shell and web tools come from the SDK.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -10,7 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { searchMessages } from '../shared/search';
-import type { Bot, Routine, State, Task } from '../shared/types';
+import { APP_SERVER, type Bot, type Routine, type State, type Task } from '../shared/types';
 import type { AgentSdk } from './agent';
 import type { ScheduleInput } from './routines';
 
@@ -214,7 +214,7 @@ function specs(ctx: ToolCtx): Spec[] {
 // The in-process server for Claude turns.
 function buildServer(agentSdk: AgentSdk, ctx: ToolCtx): McpSdkServerConfigWithInstance {
   return agentSdk.createSdkMcpServer({
-    name: 'characterbot',
+    name: APP_SERVER,
     tools: specs(ctx).map((s) => agentSdk.tool(s.name, s.description, s.shape, s.handler)),
   });
 }
@@ -229,7 +229,7 @@ function httpEndpoint(): Promise<string> {
     const srv = http.createServer(async (req, res) => {
       const ctx = turns.get((req.headers.authorization || '').replace(/^Bearer /, ''));
       if (!ctx) return void res.writeHead(401).end();
-      const server = new McpServer({ name: 'characterbot', version: '1.0.0' });
+      const server = new McpServer({ name: APP_SERVER, version: '1.0.0' });
       for (const s of specs(ctx)) server.registerTool(s.name, { description: s.description, inputSchema: s.shape }, s.handler);
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined }); // stateless
       res.on('close', () => { transport.close(); server.close(); });

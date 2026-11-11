@@ -2,6 +2,12 @@
 // what the main process broadcasts, and the preload bridge.
 import type { Actions } from '../main/main';
 
+// The app's own MCP server; its tools are `${APP_TOOLS}<name>`. Before v0.4.1 it was
+// called "characterbot" (store.ts rewrites the old prefix in saved state).
+export const APP_SERVER = 'octocrew';
+export const APP_TOOLS = `mcp__${APP_SERVER}__`;
+export const LEGACY_APP_TOOLS = 'mcp__characterbot__';
+
 export type Effect = 'allow' | 'ask' | 'deny';
 // routine-bot: a Bot doing work a routine handed it (nobody is watching either).
 export type Initiator = 'user' | 'bot' | 'routine' | 'routine-bot';
@@ -337,7 +343,7 @@ export interface Broadcast extends State {
   };
   mcpStatus: Record<string, McpStatus>;
   secretNames: string[];
-  legacySecrets: 'importing' | 'failed' | null; // CharacterBot 0.1.x secrets not yet imported
+  legacySecrets: 'importing' | 'failed' | null; // secrets from an older app name (PixelBot, CharacterBot) not yet imported
   oauthConnected: string[];
   hasGoogleClient: boolean;
   appUpdate: { version: string; url: string } | null; // a newer release, if one was found

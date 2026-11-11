@@ -2,7 +2,7 @@
 // Auth comes from the local Claude Code login unless an API key is passed in env.
 import os from 'node:os';
 import type { McpServerConfig, McpSdkServerConfigWithInstance, Options, PreToolUseHookInput, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Effect, ModelInfo, ReviewRule } from '../shared/types';
+import { APP_SERVER, type Effect, type ModelInfo, type ReviewRule } from '../shared/types';
 import type { Call } from './gateway';
 import type { Prompt } from './transcript';
 
@@ -92,7 +92,7 @@ async function runTurn(opts: TurnOptions): Promise<void> {
       includePartialMessages: true,
       // Keep the user's own ~/.claude hooks, CLAUDE.md and plugins out of the bots.
       settingSources: [],
-      mcpServers: { ...opts.mcpServers, characterbot: opts.appServer(agentSdk) },
+      mcpServers: { ...opts.mcpServers, [APP_SERVER]: opts.appServer(agentSdk) },
       disallowedTools: ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode'],
       hooks: { PreToolUse: [{ hooks: [preToolUse], timeout: 3600 }] },
       // Everything is decided by the hook; anything that still falls through is refused.

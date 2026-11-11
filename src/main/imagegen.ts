@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import type { CodexOptions, SandboxMode, ThreadEvent, ThreadOptions, UserInput } from '@openai/codex-sdk';
-import type { LoginStatus, ModelInfo } from '../shared/types';
+import { APP_SERVER, type LoginStatus, type ModelInfo } from '../shared/types';
 import { BOT_ICON_PROMPT } from './iconprompt';
 import type { AppTools } from './tools';
 
@@ -162,11 +162,11 @@ async function runTurn({ home, threadId, prompt, images, cwd, model, instruction
   const { Codex } = await import('@openai/codex-sdk');
   const config: NonNullable<CodexOptions['config']> = { developer_instructions: instructions };
   if (appTools) {
-    config.mcp_servers = { characterbot: { url: appTools.url, bearer_token_env_var: 'CHARACTERBOT_TOOLS_TOKEN', default_tools_approval_mode: 'approve' } };
+    config.mcp_servers = { [APP_SERVER]: { url: appTools.url, bearer_token_env_var: 'OCTOCREW_TOOLS_TOKEN', default_tools_approval_mode: 'approve' } };
   }
   const codex = new Codex({
     codexPathOverride: codexBin(),
-    env: { ...process.env, CODEX_HOME: botHome(home), ...(appTools ? { CHARACTERBOT_TOOLS_TOKEN: appTools.token } : {}) },
+    env: { ...process.env, CODEX_HOME: botHome(home), ...(appTools ? { OCTOCREW_TOOLS_TOKEN: appTools.token } : {}) },
     config,
   });
   const opts: ThreadOptions = {
@@ -217,7 +217,7 @@ function usage(home: string): Promise<ChatgptUsage> {
       }
     });
     const send = (m: Record<string, unknown>) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...m })}\n`);
-    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'characterbot', version: '0.1.0' } } });
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'octo-crew', version: '0.4' } } });
     send({ method: 'initialized' });
     send({ id: 2, method: 'account/rateLimits/read' });
   });
