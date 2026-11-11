@@ -1,5 +1,6 @@
 // Settings modal: a left nav and grouped cards.
 import type { Actions } from '../main/main';
+import { APP_TOOLS } from '../shared/types';
 import type { Broadcast, Effect, Provider, Settings, Skill, Usage } from '../shared/types';
 import { h, fill, $, act, icon, editing, openModal, closeModal, userAvatar, toggle, avatar, popover, toast, modelName, modelOptions, type Child } from './ui';
 import { LOGOS } from './logos';
@@ -453,7 +454,7 @@ const VIEWS: Record<Tab, () => Child[]> = {
       h('table', { class: 'audit' },
         h('tr', {}, h('th', {}, '시각'), h('th', {}, 'Bot'), h('th', {}, '작업'), h('th', {}, '결과'), h('th', {}, '입력')),
         [...S.audit].reverse().slice(0, 200).map((a) => h('tr', {},
-          h('td', {}, new Date(a.ts).toLocaleString()), h('td', {}, bot(a.botId), a.initiator === 'routine' || a.initiator === 'routine-bot' ? ' ⏰' : ''), h('td', {}, a.tool.replace(/^mcp__characterbot__/, '')),
+          h('td', {}, new Date(a.ts).toLocaleString()), h('td', {}, bot(a.botId), a.initiator === 'routine' || a.initiator === 'routine-bot' ? ' ⏰' : ''), h('td', {}, a.tool.replace(APP_TOOLS, '')),
           h('td', {}, h('span', { class: `badge ${a.outcome}` }, a.outcome)), h('td', { class: 'args' }, JSON.stringify(a.args).slice(0, 300))))),
     ];
   },
@@ -477,7 +478,7 @@ function secretsSection() {
   return [
     h('h3', {}, '환경 변수'),
     S.legacySecrets ? h('div', { class: 'group' }, h('div', { class: 'srow' }, icon('key', 16),
-      h('span', { class: 'grow' }, S.legacySecrets === 'importing' ? '이전 버전(CharacterBot)의 키와 앱 연결을 가져오는 중이에요. macOS 키체인 창에서 허용을 눌러 주세요.' : '이전 버전(CharacterBot)의 키와 앱 연결을 아직 가져오지 못했어요.'),
+      h('span', { class: 'grow' }, S.legacySecrets === 'importing' ? '이전 버전(PixelBot·CharacterBot)의 키와 앱 연결을 가져오는 중이에요. macOS 키체인 창에서 허용을 눌러 주세요.' : '이전 버전(PixelBot·CharacterBot)의 키와 앱 연결을 아직 가져오지 못했어요.'),
       S.legacySecrets === 'failed' ? h('button', { class: 'btn soft', onclick: () => act('retryLegacySecrets').then((ok) => toast(ok ? '가져왔어요' : '가져오지 못했어요. 키체인 창에서 허용을 눌러 주세요')) }, '다시 시도') : null)) : null,
     h('div', { class: 'group' },
       ...S.secretNames.map((n) => h('div', { class: 'srow' }, icon('key', 16), h('code', { class: 'grow' }, n), h('span', { class: 'muted' }, '••••••'), h('button', { class: 'x', onclick: () => act('deleteSecret', n) }, '×'))),

@@ -1,5 +1,6 @@
 import type { FileEntry } from '../main/tools';
 import { ASSISTANT_RULES, CATEGORIES, TEMPLATES, type BotTemplate } from './templates';
+import { APP_SERVER, APP_TOOLS } from '../shared/types';
 import type { ActiveRun, Approval, AuditEntry, Bot, Broadcast, Conv, MeetingCard, Message, QuestionCard, Routine, Section, Skill, SkillCard, StreamChunk } from '../shared/types';
 import { openSettings, renderSettings, planUsage, refreshUsage, confirmLogout, SETTINGS_TABS } from './settings';
 import { openApps, renderApps, serverTile } from './apps';
@@ -43,7 +44,7 @@ const conv = () => S.convs.find((c) => c.id === ui.convId);
 const currentConv = () => conv() as Conv;
 const isRunning = (id: string | null | undefined) => Boolean(id && S.runtime.running.includes(id));
 const convTitle = (c: Conv) => (c.kind === 'dm' ? botById(c.botIds[0])?.name || 'Bot' : c.name);
-const shortTool = (name: string) => name.replace(/^mcp__characterbot__/, '').replace(/^mcp__([^_]+)__/, '$1 · ');
+const shortTool = (name: string) => (name.startsWith(APP_TOOLS) ? name.slice(APP_TOOLS.length) : name).replace(/^mcp__([^_]+)__/, '$1 · ');
 
 const isMain = (id: string | undefined) => id === (S.settings.mainBotId && botById(S.settings.mainBotId) ? S.settings.mainBotId : S.bots[0]?.id);
 // A ★ on the main bot's avatar.
@@ -225,7 +226,7 @@ function approvalCard(p: Approval): HTMLElement {
   const bot = botById(p.botId);
   const parts = appOf(p.tool);
   let card: HTMLElement;
-  if (!parts || parts[1] === 'characterbot') {
+  if (!parts || parts[1] === APP_SERVER) {
     card = h('div', { class: 'card' },
       h('h4', {}, `${bot?.name}이(가) 이 작업을 하도록 허용할까요?`),
       h('div', { class: 'muted small', style: 'margin:-4px 2px 10px' }, shortTool(p.tool)),
@@ -310,7 +311,7 @@ function toolItem(c: Conv, m: Message): HTMLElement | null {
 // "메시지 보냄 (avatars) Bot 4개", "Bot 만듦 (avatar) Reviewer", "팀 만듦 HCI 리뷰어"
 // for what a bot did with create_bot / create_team / message_bot(s) / message_team.
 function teamLine(m: Message): HTMLElement | null {
-  const short = (m.name || '').replace(/^mcp__characterbot__/, '');
+  const short = (m.name || '').replace(APP_TOOLS, '');
   if (!m.content || m.content.startsWith('Error')) return null;
   const a = (m.args || {}) as Record<string, unknown>;
   const named = (n: unknown) => S.bots.find((b) => b.name.toLowerCase() === String(n).trim().replace(/^@/, '').toLowerCase());
@@ -1575,7 +1576,7 @@ window.desktop.onState((state) => {
       setTimeout(() => restyle(botId), 1600);
     }
   }
-  if (state.legacySecrets === 'failed' && S?.legacySecrets !== 'failed') toast('이전 버전(CharacterBot)의 키를 가져오지 못했어요. 설정 › 컴퓨터 › 환경 변수에서 다시 시도할 수 있어요');
+  if (state.legacySecrets === 'failed' && S?.legacySecrets !== 'failed') toast('이전 버전(PixelBot·CharacterBot)의 키를 가져오지 못했어요. 설정 › 컴퓨터 › 환경 변수에서 다시 시도할 수 있어요');
   S = state;
   renderOnboarding(state);
   render(first);

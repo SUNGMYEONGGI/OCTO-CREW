@@ -156,7 +156,7 @@ The app picks up your Claude Code login on first launch. If it does not, open ì„
 - **Skills**: instructions a Bot loads by name with `use_skill`. A Bot can propose one with `propose_skill`, and it is saved only when you press the button on the card.
 - **Apps over MCP**: remote (URL, OAuth) and local (stdio) MCP servers, a catalog of 51, `mcp.json` import, and per-Bot grants. Google apps take a Google OAuth client you register once.
 - **Notifications**: a system notification and a Dock badge for every approval or question waiting on you.
-- **Import and export**: Bots export to `<name>.characterbot.json` templates and import back; Bots import in bulk from CSV (up to 50).
+- **Import and export**: Bots export to `<name>.octocrew.json` templates and import back (files from before v0.4.1, `.characterbot.json`, still import); Bots import in bulk from CSV (up to 50).
 
 ## Bot tools
 
@@ -287,7 +287,7 @@ npm run dist       # build, then dist/OCTO-CREW-arm64.dmg and OCTO-CREW-<version
 
 | Item | Value |
 | --- | --- |
-| App ID | `com.sungmyeonggi.characterbot` |
+| App ID | `com.sungmyeonggi.octocrew` |
 | Targets | `dmg`, `zip`, arm64 |
 | Icon | `build/icon.icns`, made from `build/icon.svg` (Octo) |
 | Packaged files | `out/**` (without source maps) and `package.json`; Node dependencies of the main process from `node_modules` |

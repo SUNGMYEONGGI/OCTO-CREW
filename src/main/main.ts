@@ -20,6 +20,7 @@ import { pendingPrompt, mentionedBots } from './transcript';
 import os from 'node:os';
 import type { SandboxMode, ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { APP_TOOLS } from '../shared/types';
 import type {
   ActiveRun, Approval, Attachment, Bot, Conv, Effect, Initiator, LoginStatus, McpServer, Message, ModelInfo,
   Provider, Routine, Rule, RunRecord, Section, Settings, Skill, State, Usage,
@@ -140,7 +141,12 @@ function broadcast() {
 // A secrets.bin this build can't decrypt (PixelBot and CharacterBot used their
 // own Keychain items) is set aside, so new secrets never overwrite it, and imported
 // in the background by importLegacySecrets.
-const legacySecretsFile = () => `${secretsFile()}.${rename.LEGACY_NAME}`;
+const legacySecretsFile = () => `${secretsFile()}.legacy`;
+// Before v0.4.1 the set-aside file was named after CharacterBot.
+try {
+  const old = `${secretsFile()}.${rename.LEGACY_NAME}`;
+  if (fs.existsSync(old) && !fs.existsSync(legacySecretsFile())) fs.renameSync(old, legacySecretsFile());
+} catch {}
 function readSecrets(): SecretStore {
   let blob: Buffer;
   try {
@@ -352,16 +358,16 @@ function systemPrompt(bot: Bot, conv: Conv): string {
     const folders = conv.botIds.map(findBot).filter(isBot).filter((b) => b.id !== bot.id).map((b) => `- ${b.name}: ${workspace(b.id)}`);
     if (folders.length) parts.push(`다른 멤버의 작업 폴더(읽기 가능, 파일을 주고받을 때 경로를 알려 주세요):\n${folders.join('\n')}`);
   }
-  parts.push('일을 시작하거나 새 단계로 넘어갈 때마다 mcp__characterbot__set_status로 지금 하는 일을 "학회 정보 / 검색 중"처럼 짧게 알리세요. 먼저 무엇을 할지 한두 문장으로 말한 뒤 작업하세요. 최신 정보가 필요하면 웹 검색을 쓰세요.');
-  parts.push('현재 작업 폴더가 당신의 컴퓨터입니다. 만든 파일은 이 폴더에 저장하면 사용자의 라이브러리에 표시됩니다. 사용자에게 결정을 물을 때는 mcp__characterbot__ask_user를, 오래 기억할 사실은 mcp__characterbot__remember를, 반복 작업 요청은 mcp__characterbot__schedule_routine을 쓰세요. 다른 Bot에게 일을 맡기거나 물어볼 때는 mcp__characterbot__message_bot을, 사용자가 Bot이나 팀을 만들어 달라고 하면 mcp__characterbot__create_bot·create_team으로 직접 만들고(모델을 골라야 하면 list_models, 기존 Bot의 모델·지침 변경은 update_bot), 팀 전체에 일을 맡길 때는 mcp__characterbot__message_team을, 사용자가 요청하지 않은 회의 초대를 발견하면 mcp__characterbot__request_meeting_approval을 쓰세요. 여러 단계로 된 일은 mcp__characterbot__track_tasks로 목표와 작업 목록을 보여 주고, 지난 대화 내용이 필요하면 mcp__characterbot__search_conversations로 찾으세요.');
+  parts.push(`일을 시작하거나 새 단계로 넘어갈 때마다 ${APP_TOOLS}set_status로 지금 하는 일을 "학회 정보 / 검색 중"처럼 짧게 알리세요. 먼저 무엇을 할지 한두 문장으로 말한 뒤 작업하세요. 최신 정보가 필요하면 웹 검색을 쓰세요.`);
+  parts.push(`현재 작업 폴더가 당신의 컴퓨터입니다. 만든 파일은 이 폴더에 저장하면 사용자의 라이브러리에 표시됩니다. 사용자에게 결정을 물을 때는 ${APP_TOOLS}ask_user를, 오래 기억할 사실은 ${APP_TOOLS}remember를, 반복 작업 요청은 ${APP_TOOLS}schedule_routine을 쓰세요. 다른 Bot에게 일을 맡기거나 물어볼 때는 ${APP_TOOLS}message_bot을, 사용자가 Bot이나 팀을 만들어 달라고 하면 ${APP_TOOLS}create_bot·create_team으로 직접 만들고(모델을 골라야 하면 list_models, 기존 Bot의 모델·지침 변경은 update_bot), 팀 전체에 일을 맡길 때는 ${APP_TOOLS}message_team을, 사용자가 요청하지 않은 회의 초대를 발견하면 ${APP_TOOLS}request_meeting_approval을 쓰세요. 여러 단계로 된 일은 ${APP_TOOLS}track_tasks로 목표와 작업 목록을 보여 주고, 지난 대화 내용이 필요하면 ${APP_TOOLS}search_conversations로 찾으세요.`);
   const team = state.bots.filter((b) => b.id !== bot.id);
   if (bot.id === mainBot()?.id && team.length) {
     const role = (b: Bot) => (b.label || b.systemPrompt.split('\n')[0]).slice(0, 160);
-    parts.push(`당신은 사용자의 메인 Bot입니다. 사용자가 가장 먼저 찾는 창구로서, 다른 Bot의 전문 분야에 맞는 일은 mcp__characterbot__message_bot으로 맡기고 받은 결과를 모아 정리해 보고하세요. 서로 의존하지 않는 일은 여러 Bot에게 한 번에(동시에) 맡겨도 됩니다. 간단한 일은 직접 처리하세요.\n팀 Bot:\n${team.map((b) => `- ${b.name}: ${role(b)}`).join('\n')}`);
+    parts.push(`당신은 사용자의 메인 Bot입니다. 사용자가 가장 먼저 찾는 창구로서, 다른 Bot의 전문 분야에 맞는 일은 ${APP_TOOLS}message_bot으로 맡기고 받은 결과를 모아 정리해 보고하세요. 서로 의존하지 않는 일은 여러 Bot에게 한 번에(동시에) 맡겨도 됩니다. 간단한 일은 직접 처리하세요.\n팀 Bot:\n${team.map((b) => `- ${b.name}: ${role(b)}`).join('\n')}`);
   }
   if (state.settings.blockAccountWrites !== false) parts.push('사용자 계정과 연동된 앱(Slack, Gmail, 캘린더, Notion 등)은 읽기만 하세요. 메시지·메일 발송, 일정 생성·응답, 페이지 작성 같은 쓰기는 막혀 있으니 시도하지 말고, 보낼 내용은 채팅에 초안으로 보여주세요.');
   parts.push('답에서 다이어그램은 ```mermaid 코드 블록으로, 수식은 $...$ / $$...$$ (KaTeX)로 쓰면 채팅에 그려집니다. D3·Three.js 같은 인터랙티브 시각화는 단일 HTML 파일로 작업 폴더에 저장하면 라이브러리에서 바로 열립니다.');
-  if (conv.tasks) parts.push(`이 대화의 작업 목록 (mcp__characterbot__track_tasks로 갱신, 사용자가 직접 체크했을 수 있어요):\n목표: ${conv.tasks.goal}\n${conv.tasks.items.map((t) => `- [${t.status}] ${t.text}`).join('\n')}`);
+  if (conv.tasks) parts.push(`이 대화의 작업 목록 (${APP_TOOLS}track_tasks로 갱신, 사용자가 직접 체크했을 수 있어요):\n목표: ${conv.tasks.goal}\n${conv.tasks.items.map((t) => `- [${t.status}] ${t.text}`).join('\n')}`);
   const skills = state.skills.filter((s) => bot.skillIds.includes(s.id) && !s.disabled);
   if (skills.length) parts.push(`사용 가능한 스킬 (use_skill로 전체 지침을 불러오세요):\n${skills.map((s) => `- ${s.name}: ${s.description}`).join('\n')}`);
   if (bot.memories.length) parts.push(`기억하고 있는 사실:\n${bot.memories.map((m) => `- [${m.id}] ${m.text}`).join('\n')}`);
@@ -408,7 +414,7 @@ function finishTool(conv: Conv, bot: Bot, toolMsg: Message, output: string, isEr
   const args = (toolMsg.args || {}) as Record<string, string>;
   toolMsg.content = gateway.maskSecrets(output, secretValues);
   if (isError && toolMsg.effect !== 'deny' && !toolMsg.content.startsWith('Error:')) toolMsg.content = `Error: ${toolMsg.content}`;
-  const short = name.replace(/^mcp__characterbot__/, '');
+  const short = (name.startsWith(APP_TOOLS) ? name.slice(APP_TOOLS.length) : name);
   if (!isError && short === 'ask_user') toolMsg.card = { type: 'question', question: args.question, options: (toolMsg.args?.options as string[]) || [] };
   if (!isError && short === 'request_meeting_approval') toolMsg.card = { ...args, type: 'meeting', title: args.title };
   if (!isError && short === 'propose_skill') toolMsg.card = { type: 'skill', name: args.name, description: args.description, body: args.body };
@@ -427,7 +433,7 @@ function finishTool(conv: Conv, bot: Bot, toolMsg: Message, output: string, isEr
 const judgeCache = new Map<string, number[]>();
 const where = (botId?: string): gateway.Where | undefined => (botId ? { cwd: workspace(botId), dataDir: dataDir(), home: os.homedir() } : undefined);
 // Tools that rewrite a Bot's instructions/model or start work later on their own.
-const CONFIG_TOOLS = /^mcp__characterbot__(update_bot|schedule_routine)$/;
+const CONFIG_TOOLS = new RegExp(`^${APP_TOOLS}(update_bot|schedule_routine)$`);
 async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effect; reason?: string; rule?: Rule | null }> {
   const s = state.settings;
   // Hard stop: never write to apps linked to the user's real accounts (no rule,
@@ -455,7 +461,7 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
   }
   if (!s.autoReview) return { effect: 'allow' };
   const base = gateway.decide(call, state.rules, { Bash: s.computerAccess });
-  if (base.rule || call.name.startsWith('mcp__characterbot__') || !s.reviewRules.length) return base;
+  if (base.rule || call.name.startsWith(APP_TOOLS) || !s.reviewRules.length) return base;
   const key = JSON.stringify([s.reviewRules, call.name, call.args]);
   try {
     if (!judgeCache.has(key)) judgeCache.set(key, await agent.judgeRules({ rules: s.reviewRules, call, env: agentEnv(secrets) }));
@@ -597,7 +603,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     const decision = await review({ ...call, botId: bot.id, initiator }, secrets);
     let effect = decision.effect;
     let updatedInput: Record<string, unknown> | undefined;
-    const external = call.name.startsWith('mcp__') && !call.name.startsWith('mcp__characterbot__');
+    const external = call.name.startsWith('mcp__') && !call.name.startsWith(APP_TOOLS);
     const grant = grants.get(bot.id);
     if (effect === 'ask' && external && /calendar|event/i.test(call.name) && grant && grant.convId === conv.id && Date.now() < grant.until
       && JSON.stringify(call.args).includes(grant.eventId)) {
@@ -772,12 +778,12 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
       broadcast();
     };
     const sandbox = ({ allow: 'danger-full-access', ask: 'workspace-write', deny: 'read-only' } as const satisfies Record<Effect, SandboxMode>)[state.settings.computerAccess] || 'workspace-write';
-    // Only the app tools (mcp__characterbot__*) come along; no account-linked apps.
+    // Only the app tools (mcp__octocrew__*) come along; no account-linked apps.
     const appTools = await tools.openHttpTurn(toolCtx);
     try {
       session.id = await imagegen.runTurn({
         home: codexHome(), threadId: session.id, prompt: text, images: files, cwd: ws, model: model.slice('openai:'.length),
-        instructions: `${systemPrompt(bot, conv)}\n\n(이 실행 환경에서는 characterbot MCP 서버의 도구(ask_user, remember, message_bot 등)만 쓸 수 있고, 사용자 계정과 연동된 앱은 없습니다.)`,
+        instructions: `${systemPrompt(bot, conv)}\n\n(이 실행 환경에서는 octocrew MCP 서버의 도구(ask_user, remember, message_bot 등)만 쓸 수 있고, 사용자 계정과 연동된 앱은 없습니다.)`,
         sandbox, additionalDirectories: conv.kind === 'group' ? conv.botIds.filter((id) => id !== bot.id && findBot(id)).map((id) => workspace(id)) : [],
         appTools, signal, on,
       });
@@ -915,7 +921,7 @@ function threadBots(conv: Conv, rootId: string): string[] {
   return ids.length ? [...new Set(ids)] : conv.botIds;
 }
 
-// A bot DMs another bot (mcp__characterbot__message_bot): the message lands in the
+// A bot DMs another bot (mcp__octocrew__message_bot): the message lands in the
 // target's chat, the target answers there, and the answer goes back as the tool
 // result. One hop only, so two bots can't keep each other busy.
 // Files a bot hands over (attachments of message_bot / message_bots / message_team):
@@ -1744,17 +1750,18 @@ const actions = {
   },
   async exportBot(id: string) {
     const bot = getBot(id);
-    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow(), { defaultPath: `${bot.name}.characterbot.json` });
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow(), { defaultPath: `${bot.name}.octocrew.json` });
     if (canceled || !filePath) return;
     const skills = state.skills.filter((s) => bot.skillIds.includes(s.id)).map(({ name, description, body }) => ({ name, description, body }));
     const { name, label, color, systemPrompt: prompt, model } = bot;
-    fs.writeFileSync(filePath, JSON.stringify({ characterbotTemplate: 1, name, label, color, systemPrompt: prompt, model, skills }, null, 2));
+    fs.writeFileSync(filePath, JSON.stringify({ octocrewTemplate: 1, name, label, color, systemPrompt: prompt, model, skills }, null, 2));
   },
   async importBot(): Promise<string | null> {
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow(), { filters: [{ name: 'Bot 템플릿', extensions: ['json'] }] });
     if (canceled) return null;
     const tpl = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
-    if (tpl.characterbotTemplate !== 1) throw new Error('Bot 템플릿 파일이 아닙니다');
+    // Templates exported before v0.4.1 use the old key.
+    if (tpl.octocrewTemplate !== 1 && tpl.characterbotTemplate !== 1) throw new Error('Bot 템플릿 파일이 아닙니다');
     const skills = (Array.isArray(tpl.skills) ? tpl.skills : []).filter((x: unknown) => typeof (x as { name?: unknown })?.name === 'string') as { name: string; description?: string; body?: string }[];
     // A shared template can carry hidden instructions: show them before creating the Bot.
     const prompt = typeof tpl.systemPrompt === 'string' ? tpl.systemPrompt : '';

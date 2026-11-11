@@ -188,9 +188,9 @@ const LOG: [Member, string, string, string][] = [
   [drop, 'Write feedback.csv', 'allowed', 'ok'],
   [mina, 'Gmail draft to beta testers', 'waiting', 'wait'],
   [mina, 'Gmail draft to beta testers', 'approved', 'ok'],
-  [octo, 'mcp__characterbot__schedule_routine', 'allowed', 'ok'],
+  [octo, 'mcp__octocrew__schedule_routine', 'allowed', 'ok'],
   [fold, 'Write error-message.md', 'allowed', 'ok'],
-  [octo, 'mcp__characterbot__remember', 'allowed', 'ok'],
+  [octo, 'mcp__octocrew__remember', 'allowed', 'ok'],
   [octo, 'Slack post as you', 'blocked', ''],
 ];
 const log = $('log');

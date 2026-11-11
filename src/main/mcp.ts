@@ -58,7 +58,7 @@ async function probe(server: McpServer, secrets: Secrets, token?: string): Promi
   const transport = cfg.url
     ? new StreamableHTTPClientTransport(new URL(cfg.url), { requestInit: { headers: headersOf(cfg, token) } })
     : new StdioClientTransport({ command: cfg.command || '', args: cfg.args || [], env: { ...getDefaultEnvironment(), ...cfg.env }, stderr: 'ignore' });
-  const client = new Client({ name: 'characterbot', version: '0.1.0' });
+  const client = new Client({ name: 'octo-crew', version: '0.4' });
   try {
     await client.connect(transport);
     const { tools } = await client.listTools();

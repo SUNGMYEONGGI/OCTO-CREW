@@ -7,7 +7,7 @@
 // (e.g. Bash under settings › 컴퓨터) come first.
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Effect, Initiator, Rule } from '../shared/types';
+import { APP_SERVER, APP_TOOLS, type Effect, type Initiator, type Rule } from '../shared/types';
 
 export interface Call {
   id?: string;
@@ -24,7 +24,7 @@ export interface Decision {
 const APP_READ = /(^|[_-])(list|get|search|read|fetch|query|find|view|describe|lookup|check|status|whoami|me|info|retrieve|download|resolve|suggest)([_-]|$)/i;
 function defaultEffect(call: Call, overrides: Record<string, Effect>): Effect {
   if (overrides[call.name]) return overrides[call.name];
-  if (call.name.startsWith('mcp__') && !call.name.startsWith('mcp__characterbot__')) {
+  if (call.name.startsWith('mcp__') && !call.name.startsWith(APP_TOOLS)) {
     return APP_READ.test(call.name.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '')) ? 'allow' : 'ask';
   }
   return 'allow';
@@ -34,7 +34,7 @@ function defaultEffect(call: Call, overrides: Record<string, Effect>): Effect {
 // remote (URL/OAuth) servers. remote: tool-name slugs of remote servers.
 function accountWrite(name: string, remote: string[] = []): boolean {
   const m = name.match(/^mcp__(.+?)__(.+)$/);
-  if (!m || m[1] === 'characterbot' || APP_READ.test(m[2])) return false;
+  if (!m || m[1] === APP_SERVER || APP_READ.test(m[2])) return false;
   return m[1].startsWith('claude_ai_') || remote.includes(m[1]);
 }
 
@@ -43,7 +43,7 @@ function accountWrite(name: string, remote: string[] = []): boolean {
 // computer access, so a prompt injection can't quietly read keys.
 const SENSITIVE = [
   /(^|[\s"'/=~])\.ssh(\/|\b)/, /\.gnupg\b/, /\.aws\/(credentials|config)\b/, /\.netrc\b/, /\.npmrc\b/, /\.pypirc\b/, /\.docker\/config\.json/,
-  /\.kube\/config\b/, /\.config\/(gh|gcloud|characterbot)\b/, /\.claude\.json\b/, /\.codex\/auth\.json/, /codex\/auth\.json/,
+  /\.kube\/config\b/, /\.config\/(gh|gcloud|octocrew|characterbot)\b/, /\.claude\.json\b/, /\.codex\/auth\.json/, /codex\/auth\.json/,
   /Library\/Keychains\b/, /\bsecurity\s+(find-(generic|internet)-password|dump-keychain|export|unlock-keychain)\b/, /Library\/Cookies\b/,
   /Library\/Application Support\/(Google\/Chrome|BraveSoftware|Microsoft Edge|Arc|Firefox|Vivaldi|com\.operasoftware)/, /Library\/Safari\b/, /Library\/Messages\b/, /Library\/Mail\b/,
   /\bsecrets\.bin\b/, /Application Support\/(OCTO CREW|PixelBot|CharacterBot)( Dev)?\/state\.json/,

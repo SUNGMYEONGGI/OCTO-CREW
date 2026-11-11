@@ -1,4 +1,4 @@
--- CharacterBot cloud data: bots, conversations, messages, memories, routines.
+-- OCTO CREW cloud data: bots, conversations, messages, memories, routines.
 -- Never stores secrets (API keys, OAuth tokens, webhook keys, MCP env).
 -- Every row belongs to a Supabase Auth user; RLS limits access to the owner.
 

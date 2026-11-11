@@ -15,7 +15,7 @@
     "site": "node scripts/build-site.mjs"
   },
   "build": {
-    "appId": "com.sungmyeonggi.characterbot",
+    "appId": "com.sungmyeonggi.octocrew",
     "productName": "OCTO CREW",
     "directories": {
       "output": "dist",
