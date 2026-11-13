@@ -1442,7 +1442,7 @@ function renderTasks() {
     const face = bots[0] ? avatar(bots[0], 28, 'idle') : null;
     return h('div', { class: 'task-row' }, face && r.ok && !r.stopped ? h('span', { class: 'av-done', title: '완료' }, face, h('span', { class: 'check' }, icon('check', 10))) : face,
       h('div', { class: 'grow' }, h('div', {}, bots.map((b) => b.name).join(', ') || 'Bot', h('span', { class: 'muted' }, ` · ${c ? convTitle(c) : '삭제된 대화'}`)),
-        h('div', { class: 'muted small' }, `${r.stopped ? '중지됨' : r.ok ? '완료' : '오류'} · ${ago(r.end - r.start)} 걸림 · ${ago(now - r.end)} 전${r.initiator === 'routine' ? ' · 루틴' : r.initiator === 'bot' || r.initiator === 'routine-bot' ? ' · Bot 요청' : ''}`)),
+        h('div', { class: 'muted small' }, `${r.stopped ? '중지됨' : r.ok ? '완료' : '오류'} · ${ago(r.end - r.start)} 걸림 · ${ago(now - r.end)} 전${r.initiator === 'routine' || r.initiator === 'event' ? ' · 루틴' : r.initiator !== 'user' ? ' · Bot 요청' : ''}`)),
       c ? h('button', { class: 'btn ghost', onclick: open(r.convId) }, '열기') : null);
   });
   fill(body,

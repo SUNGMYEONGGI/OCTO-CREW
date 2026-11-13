@@ -1,6 +1,6 @@
 // Settings modal: a left nav and grouped cards.
 import type { Actions } from '../main/main';
-import { APP_TOOLS } from '../shared/types';
+import { APP_TOOLS, UNATTENDED } from '../shared/types';
 import type { Broadcast, Effect, Provider, Settings, Skill, Usage } from '../shared/types';
 import { h, fill, $, act, icon, editing, openModal, closeModal, userAvatar, toggle, avatar, popover, toast, modelName, modelOptions, type Child } from './ui';
 import { LOGOS } from './logos';
@@ -454,7 +454,7 @@ const VIEWS: Record<Tab, () => Child[]> = {
       h('table', { class: 'audit' },
         h('tr', {}, h('th', {}, '시각'), h('th', {}, 'Bot'), h('th', {}, '작업'), h('th', {}, '결과'), h('th', {}, '입력')),
         [...S.audit].reverse().slice(0, 200).map((a) => h('tr', {},
-          h('td', {}, new Date(a.ts).toLocaleString()), h('td', {}, bot(a.botId), a.initiator === 'routine' || a.initiator === 'routine-bot' ? ' ⏰' : ''), h('td', {}, a.tool.replace(APP_TOOLS, '')),
+          h('td', {}, new Date(a.ts).toLocaleString()), h('td', {}, bot(a.botId), UNATTENDED.includes(a.initiator) ? ' ⏰' : ''), h('td', {}, a.tool.replace(APP_TOOLS, '')),
           h('td', {}, h('span', { class: `badge ${a.outcome}` }, a.outcome)), h('td', { class: 'args' }, JSON.stringify(a.args).slice(0, 300))))),
     ];
   },

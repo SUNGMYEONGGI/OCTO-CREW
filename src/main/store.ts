@@ -42,7 +42,7 @@ function defaultState(): State {
       timezone: 'auto',
       autoReview: true,
       reviewRules: [],
-      computerAccess: 'allow',
+      computerAccess: 'ask',
       fullAccess: true,
       blockAccountWrites: true,
       micId: '',
@@ -72,8 +72,6 @@ function migrate(raw: any): State {
   delete state.settings.auth;
   // Installs from before first-run setup existed are already set up.
   if (raw.settings && raw.settings.onboarded === undefined) state.settings.onboarded = true;
-  // Full permissions became the default; move older installs over once.
-  if (!raw.settings?.fullAccess && raw.settings) Object.assign(state.settings, { computerAccess: 'allow', fullAccess: true });
   if (raw.agents && !raw.bots) {
     state.bots = raw.agents.map(({ messages: _, ...a }: any) => ({ ...newBot(a.name, 0), ...a }));
     state.convs = raw.agents.map((a: any) => ({ ...newConv('dm', [a.id]), messages: a.messages.map((m: any) => ({ id: id('msg'), ts: Date.now(), ...m, botId: m.role === 'assistant' ? a.id : undefined })) }));

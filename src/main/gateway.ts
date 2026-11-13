@@ -2,12 +2,12 @@
 // and is audited after, mirroring OpenBot's gateway: deny beats allow, and
 // anything unmatched falls back to the tool's default effect.
 
-// Bots have full permissions by default, except that a connected (external) app
+// Built-in tools run by default (Bash follows 설정 › 컴퓨터, 먼저 묻기 by default), and a connected (external) app
 // asks before anything that isn't a read. The user's rules and per-tool settings
 // (e.g. Bash under settings › 컴퓨터) come first.
 import fs from 'node:fs';
 import path from 'node:path';
-import { APP_SERVER, APP_TOOLS, type Effect, type Initiator, type Rule } from '../shared/types';
+import { APP_SERVER, APP_TOOLS, UNATTENDED, UNTRUSTED, type Effect, type Initiator, type Rule } from '../shared/types';
 
 export interface Call {
   id?: string;
@@ -124,9 +124,14 @@ function combine(effects: Effect[]): Effect | null {
   return new Set(effects).size > 1 ? 'ask' : effects[0];
 }
 
+// A shell command in a run started by outside text (webhook, folder, PR).
+function untrustedShell(call: Call): boolean {
+  return call.name === 'Bash' && Boolean(call.initiator && UNTRUSTED.includes(call.initiator));
+}
+
 // Nobody is watching a scheduled run, so "ask" fails closed.
 function finalize(effect: Effect, rule: Rule | null, call: Call): Decision {
-  if (effect === 'ask' && (call.initiator === 'routine' || call.initiator === 'routine-bot')) {
+  if (effect === 'ask' && call.initiator && UNATTENDED.includes(call.initiator)) {
     return { effect: 'deny', rule, reason: '루틴 실행 중에는 승인이 필요한 작업을 할 수 없습니다' };
   }
   return { effect, rule };
@@ -140,4 +145,4 @@ function maskSecrets(text: unknown, secretValues: string[]): string {
   return out;
 }
 
-export { accountWrite, sensitive, decide, finalize, combine, maskSecrets, globToRegExp };
+export { untrustedShell, accountWrite, sensitive, decide, finalize, combine, maskSecrets, globToRegExp };

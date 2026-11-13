@@ -152,17 +152,20 @@ export interface CodexTurn {
   model: string;
   instructions: string;
   sandbox: SandboxMode;
+  network: boolean; // shell commands may reach the network (web search is separate)
   additionalDirectories: string[];
   appTools?: AppTools;
   signal: AbortSignal;
   on: (event: ThreadEvent) => void;
 }
 
-async function runTurn({ home, threadId, prompt, images, cwd, model, instructions, sandbox, additionalDirectories, appTools, signal, on }: CodexTurn): Promise<string | null> {
+async function runTurn({ home, threadId, prompt, images, cwd, model, instructions, sandbox, network, additionalDirectories, appTools, signal, on }: CodexTurn): Promise<string | null> {
   const { Codex } = await import('@openai/codex-sdk');
   const config: NonNullable<CodexOptions['config']> = { developer_instructions: instructions };
   if (appTools) {
-    config.mcp_servers = { [APP_SERVER]: { url: appTools.url, bearer_token_env_var: 'OCTOCREW_TOOLS_TOKEN', default_tools_approval_mode: 'approve' } };
+    config.mcp_servers = { [APP_SERVER]: { url: appTools.url, bearer_token_env_var: 'OCTOCREW_TOOLS_TOKEN', default_tools_approval_mode: 'approve',
+      // A call can wait on the user's approval card (Bot changes, routines).
+      tool_timeout_sec: 600 } };
   }
   const codex = new Codex({
     codexPathOverride: codexBin(),
@@ -171,7 +174,7 @@ async function runTurn({ home, threadId, prompt, images, cwd, model, instruction
   });
   const opts: ThreadOptions = {
     model, workingDirectory: cwd, skipGitRepoCheck: true, sandboxMode: sandbox, approvalPolicy: 'never',
-    networkAccessEnabled: true, webSearchMode: 'live', additionalDirectories,
+    networkAccessEnabled: network, webSearchMode: 'live', additionalDirectories,
   };
   const thread = threadId ? codex.resumeThread(threadId, opts) : codex.startThread(opts);
   const input: UserInput[] = [{ type: 'text', text: prompt || '(첨부 파일)' }, ...images.map((p) => ({ type: 'local_image' as const, path: p }))];

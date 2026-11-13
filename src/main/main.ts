@@ -20,7 +20,7 @@ import { pendingPrompt, mentionedBots } from './transcript';
 import os from 'node:os';
 import type { SandboxMode, ThreadEvent, ThreadItem } from '@openai/codex-sdk';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { APP_TOOLS } from '../shared/types';
+import { APP_TOOLS, UNTRUSTED } from '../shared/types';
 import type {
   ActiveRun, Approval, Attachment, Bot, Conv, Effect, Initiator, LoginStatus, McpServer, Message, ModelInfo,
   Provider, Routine, Rule, RunRecord, Section, Settings, Skill, State, Usage,
@@ -440,6 +440,9 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
   // draft or meeting card can lift it; only the setting can).
   const remote = state.mcpServers.filter((sv) => sv.url).map((sv) => mcp.slug(sv.name));
   // Bash follows 설정 › 컴퓨터 › 이 컴퓨터에서 실행.
+  // Webhook, folder and PR runs carry outside text and nobody watches them: no
+  // Bash there, whatever the settings or any allow rule say.
+  if (gateway.untrustedShell(call)) return gateway.finalize('ask', null, call);
   if (s.blockAccountWrites !== false && gateway.accountWrite(call.name, remote)) {
     return { effect: 'deny', reason: '사용자 계정과 연동된 앱(Slack, Gmail, 캘린더 등)에 쓰는 작업은 막혀 있습니다. 보내려던 내용은 채팅에 초안으로 보여주세요.' };
   }
@@ -537,7 +540,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
   const tagged = state.mcpServers.filter((sv) => sv.enabled && pending.text.toLowerCase().includes(`@${sv.name.toLowerCase()}`));
   const others = state.bots.filter((b) => b.id !== bot.id).map((b) => b.name);
   const threadNote = tag.threadOf ? `\n\n(스레드 대화입니다${conv.kind === 'dm' && conv.botIds[0] !== bot.id ? ` — ${findBot(conv.botIds[0])?.name}와(과) 사용자의 대화에 초대받았습니다` : ''}. 다른 Bot의 의견이나 도움이 필요하면 답에서 @이름으로 부르세요. 부른 Bot이 이 스레드에서 이어서 답합니다. 부를 수 있는 Bot: ${others.join(', ')}. 할 말이 끝났으면 아무도 부르지 마세요.)` : '';
-  const quiet = initiator === 'routine' ? `\n\n(정기 점검입니다. 사용자에게 먼저 알릴 만한 새 소식이나 할 일이 없으면 다른 말 없이 정확히 ${QUIET} 이라고만 답하세요. 있으면 바로 본론부터 알려 주세요.)` : '';
+  const quiet = initiator === 'routine' || initiator === 'event' ? `\n\n(정기 점검입니다. 사용자에게 먼저 알릴 만한 새 소식이나 할 일이 없으면 다른 말 없이 정확히 ${QUIET} 이라고만 답하세요. 있으면 바로 본론부터 알려 주세요.)` : '';
   const text = (tagged.length ? `${pending.text}\n\n(사용자가 ${tagged.map((sv) => `@${sv.name}`).join(', ')} 앱을 지목했어요. 이 앱의 도구(${tagged.map((sv) => `mcp__${mcp.slug(sv.name)}__*`).join(', ')})를 사용하세요.)` : pending.text) + threadNote + quiet;
   const serverIds = [...new Set([...bot.serverIds, ...tagged.map((sv) => sv.id)])];
   const ws = workspace(bot.id);
@@ -777,14 +780,25 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
       if (ev.type === 'item.completed') finishTool(conv, bot, toolMsg, t.out || '', t.failed, initiator, secretValues);
       broadcast();
     };
-    const sandbox = ({ allow: 'danger-full-access', ask: 'workspace-write', deny: 'read-only' } as const satisfies Record<Effect, SandboxMode>)[state.settings.computerAccess] || 'workspace-write';
+    // Codex runs with approvalPolicy 'never', so the gateway can't ask before its
+    // commands: it never gets full access. 항상 허용 writes in the workspace with
+    // the network on; 먼저 묻기 the same without network; a run started by outside
+    // text (webhook, folder, PR) or 허용 안 함 only reads.
+    const access = UNTRUSTED.includes(initiator) ? 'deny' : state.settings.computerAccess;
+    const sandbox = ({ allow: 'workspace-write', ask: 'workspace-write', deny: 'read-only' } as const satisfies Record<Effect, SandboxMode>)[access] || 'read-only';
+    const network = access === 'allow';
     // Only the app tools (mcp__octocrew__*) come along; no account-linked apps.
+    // Its app-tool calls go through the same check as a Claude turn's.
+    toolCtx.review = async (name, args) => {
+      const r = await gate({ id: store.id('call'), name: `${APP_TOOLS}${name}`, args });
+      return r.effect === 'deny' ? r.reason || '거부됨' : null;
+    };
     const appTools = await tools.openHttpTurn(toolCtx);
     try {
       session.id = await imagegen.runTurn({
         home: codexHome(), threadId: session.id, prompt: text, images: files, cwd: ws, model: model.slice('openai:'.length),
         instructions: `${systemPrompt(bot, conv)}\n\n(이 실행 환경에서는 octocrew MCP 서버의 도구(ask_user, remember, message_bot 등)만 쓸 수 있고, 사용자 계정과 연동된 앱은 없습니다.)`,
-        sandbox, additionalDirectories: conv.kind === 'group' ? conv.botIds.filter((id) => id !== bot.id && findBot(id)).map((id) => workspace(id)) : [],
+        sandbox, network, additionalDirectories: conv.kind === 'group' ? conv.botIds.filter((id) => id !== bot.id && findBot(id)).map((id) => workspace(id)) : [],
         appTools, signal, on,
       });
     } finally {
@@ -948,8 +962,12 @@ function handFiles(from: Bot, paths: string[] = [], to: string[]): Attachment[] 
   });
 }
 
+// A Bot asked by another Bot runs as its helper; it can't pass the work on again.
+const delegated = (i: Initiator) => i === 'bot' || i === 'routine-bot' || i === 'event-bot';
+const helper = (i: Initiator): Initiator => (i === 'routine' ? 'routine-bot' : i === 'event' ? 'event-bot' : 'bot');
+
 async function messageBot(from: Bot, name: string, text: string, initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
-  if (initiator === 'bot' || initiator === 'routine-bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 또 다른 Bot에게 보낼 수 없어요');
+  if (delegated(initiator)) throw new Error('다른 Bot이 맡긴 일을 하는 중에는 또 다른 Bot에게 보낼 수 없어요');
   const others = state.bots.filter((b) => b.id !== from.id);
   const target = others.find((b) => b.name.toLowerCase() === name.trim().replace(/^@/, '').toLowerCase());
   if (!target) throw new Error(`"${name}" Bot이 없어요. 보낼 수 있는 Bot: ${others.map((b) => b.name).join(', ')}`);
@@ -968,7 +986,7 @@ async function messageBot(from: Bot, name: string, text: string, initiator: Init
   dm.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, viaBotId: from.id, attachments });
   touch(dm);
   try {
-    await respond(dm, [target.id], initiator === 'routine' ? 'routine-bot' : 'bot', { viaBotId: from.id });
+    await respond(dm, [target.id], helper(initiator), { viaBotId: from.id });
   } finally {
     if (active) active.delegates = (active.delegates || []).filter((id) => id !== target.id);
     broadcast();
@@ -1052,7 +1070,7 @@ function greet(from: Bot | null, bot: Bot, note?: string): void {
 // A bot posts to a team chat (message_team); the mentioned members, or all of
 // them, answer there and their replies come back as the tool result.
 async function messageTeam(from: Bot, team: Conv, text: string, mention: string[], initiator: Initiator, fromConv: Conv, files?: string[]): Promise<string> {
-  if (initiator === 'bot' || initiator === 'routine-bot') throw new Error('다른 Bot이 맡긴 일을 하는 중에는 팀에 보낼 수 없어요');
+  if (delegated(initiator)) throw new Error('다른 Bot이 맡긴 일을 하는 중에는 팀에 보낼 수 없어요');
   const members = team.botIds.filter((id) => id !== from.id);
   const targets = mention.length ? botsNamed(mention).map((b) => b.id).filter((id) => members.includes(id)) : members;
   if (!targets.length) throw new Error(`"${team.name}" 팀에 답할 Bot이 없어요`);
@@ -1067,7 +1085,7 @@ async function messageTeam(from: Bot, team: Conv, text: string, mention: string[
   team.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: text, fromBotId: from.id, attachments });
   touch(team);
   try {
-    await respond(team, targets, initiator === 'routine' ? 'routine-bot' : 'bot', {}, true);
+    await respond(team, targets, helper(initiator), {}, true);
   } finally {
     if (active) active.delegates = (active.delegates || []).filter((id) => !targets.includes(id));
     broadcast();
@@ -1120,7 +1138,7 @@ async function runRoutine(routine: Routine, conv: Conv, event: string | null = n
   const updatedAt = conv.updatedAt;
   conv.messages.push({ id: store.id('msg'), role: 'user', ts: Date.now(), content: `⏰ 루틴: ${routine.prompt}`, routineId: routine.id, ...(event ? { event } : {}) });
   touch(conv);
-  const ok = await respond(conv, [routine.botId], 'routine');
+  const ok = await respond(conv, [routine.botId], event ? 'event' : 'routine');
   const run = conv.messages.slice(start);
   const said = run.filter((m) => m.role === 'assistant' && (m.content || m.error));
   if (ok && said.length && said.every((m) => m.content.trim() === QUIET) && !run.some((m) => m.card)) {
