@@ -163,7 +163,9 @@ async function runTurn({ home, threadId, prompt, images, cwd, model, instruction
   const { Codex } = await import('@openai/codex-sdk');
   const config: NonNullable<CodexOptions['config']> = { developer_instructions: instructions };
   if (appTools) {
-    config.mcp_servers = { [APP_SERVER]: { url: appTools.url, bearer_token_env_var: 'OCTOCREW_TOOLS_TOKEN', default_tools_approval_mode: 'approve' } };
+    config.mcp_servers = { [APP_SERVER]: { url: appTools.url, bearer_token_env_var: 'OCTOCREW_TOOLS_TOKEN', default_tools_approval_mode: 'approve',
+      // A call can wait on the user's approval card (Bot changes, routines).
+      tool_timeout_sec: 600 } };
   }
   const codex = new Codex({
     codexPathOverride: codexBin(),
