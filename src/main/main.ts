@@ -440,6 +440,9 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
   // draft or meeting card can lift it; only the setting can).
   const remote = state.mcpServers.filter((sv) => sv.url).map((sv) => mcp.slug(sv.name));
   // Bash follows 설정 › 컴퓨터 › 이 컴퓨터에서 실행.
+  // Webhook, folder and PR runs carry outside text and nobody watches them: no
+  // Bash there, whatever the settings or any allow rule say.
+  if (gateway.untrustedShell(call)) return gateway.finalize('ask', null, call);
   if (s.blockAccountWrites !== false && gateway.accountWrite(call.name, remote)) {
     return { effect: 'deny', reason: '사용자 계정과 연동된 앱(Slack, Gmail, 캘린더 등)에 쓰는 작업은 막혀 있습니다. 보내려던 내용은 채팅에 초안으로 보여주세요.' };
   }
@@ -459,9 +462,6 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
     const asked = gateway.finalize('ask', null, call);
     return { ...asked, reason: asked.reason || 'Bot 설정을 바꾸거나 루틴을 만드는 작업은 확인이 필요해요' };
   }
-  // Webhook, folder and PR runs carry outside text and nobody watches them: no
-  // Bash there, whatever the settings or an allow rule say.
-  if (gateway.untrustedShell(call)) return gateway.finalize('ask', null, call);
   if (!s.autoReview) return { effect: 'allow' };
   const base = gateway.decide(call, state.rules, { Bash: s.computerAccess });
   if (base.rule || call.name.startsWith(APP_TOOLS) || !s.reviewRules.length) return base;
@@ -788,6 +788,11 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     const sandbox = ({ allow: 'workspace-write', ask: 'workspace-write', deny: 'read-only' } as const satisfies Record<Effect, SandboxMode>)[access] || 'read-only';
     const network = access === 'allow';
     // Only the app tools (mcp__octocrew__*) come along; no account-linked apps.
+    // Its app-tool calls go through the same check as a Claude turn's.
+    toolCtx.review = async (name, args) => {
+      const r = await gate({ id: store.id('call'), name: `${APP_TOOLS}${name}`, args });
+      return r.effect === 'deny' ? r.reason || '거부됨' : null;
+    };
     const appTools = await tools.openHttpTurn(toolCtx);
     try {
       session.id = await imagegen.runTurn({

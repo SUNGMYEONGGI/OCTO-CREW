@@ -95,6 +95,9 @@ export interface ToolCtx {
   messageTeam: (team: string, message: string, mention?: string[], files?: string[]) => Promise<string>;
   setStatus: (subject: string, verb: string) => void;
   setTasks: (goal: string, items: Task[]) => void;
+  // Codex turns: the permission check Claude turns get from their PreToolUse
+  // hook. Returns why the call was refused, or null to run it.
+  review?: (name: string, args: Record<string, unknown>) => Promise<string | null>;
 }
 
 // One tool, independent of which MCP server carries it.
@@ -230,7 +233,12 @@ function httpEndpoint(): Promise<string> {
       const ctx = turns.get((req.headers.authorization || '').replace(/^Bearer /, ''));
       if (!ctx) return void res.writeHead(401).end();
       const server = new McpServer({ name: APP_SERVER, version: '1.0.0' });
-      for (const s of specs(ctx)) server.registerTool(s.name, { description: s.description, inputSchema: s.shape }, s.handler);
+      for (const s of specs(ctx)) {
+        server.registerTool(s.name, { description: s.description, inputSchema: s.shape }, async (args: Record<string, unknown>) => {
+          const refused = ctx.review ? await ctx.review(s.name, args) : null;
+          return refused ? { ...text(`Error: ${refused}`), isError: true } : s.handler(args);
+        });
+      }
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined }); // stateless
       res.on('close', () => { transport.close(); server.close(); });
       await server.connect(transport);
