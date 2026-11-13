@@ -152,13 +152,14 @@ export interface CodexTurn {
   model: string;
   instructions: string;
   sandbox: SandboxMode;
+  network: boolean; // shell commands may reach the network (web search is separate)
   additionalDirectories: string[];
   appTools?: AppTools;
   signal: AbortSignal;
   on: (event: ThreadEvent) => void;
 }
 
-async function runTurn({ home, threadId, prompt, images, cwd, model, instructions, sandbox, additionalDirectories, appTools, signal, on }: CodexTurn): Promise<string | null> {
+async function runTurn({ home, threadId, prompt, images, cwd, model, instructions, sandbox, network, additionalDirectories, appTools, signal, on }: CodexTurn): Promise<string | null> {
   const { Codex } = await import('@openai/codex-sdk');
   const config: NonNullable<CodexOptions['config']> = { developer_instructions: instructions };
   if (appTools) {
@@ -171,7 +172,7 @@ async function runTurn({ home, threadId, prompt, images, cwd, model, instruction
   });
   const opts: ThreadOptions = {
     model, workingDirectory: cwd, skipGitRepoCheck: true, sandboxMode: sandbox, approvalPolicy: 'never',
-    networkAccessEnabled: true, webSearchMode: 'live', additionalDirectories,
+    networkAccessEnabled: network, webSearchMode: 'live', additionalDirectories,
   };
   const thread = threadId ? codex.resumeThread(threadId, opts) : codex.startThread(opts);
   const input: UserInput[] = [{ type: 'text', text: prompt || '(첨부 파일)' }, ...images.map((p) => ({ type: 'local_image' as const, path: p }))];
