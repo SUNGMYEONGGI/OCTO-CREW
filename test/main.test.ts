@@ -43,6 +43,11 @@ assert.equal(migrated.bots[0].id, 'a1');
 assert.equal(migrated.convs[0].messages[1].botId, 'a1');
 assert.deepEqual(migrated.bots[0].memories, []);
 assert.equal(migrated.settings.model, '');
+// #2: fresh installs ask before Bash, and an older save keeps the access it had.
+assert.equal(s.settings.computerAccess, 'ask');
+fs.writeFileSync(file, JSON.stringify({ settings: { computerAccess: 'deny' } }));
+assert.equal(store.load(file).settings.computerAccess, 'deny');
+store.save(file, s);
 assert.equal(migrated.settings.onboarded, true); // saved before first-run setup existed
 assert.equal(store.defaultState().settings.onboarded, false);
 assert.equal((migrated.settings as unknown as Record<string, unknown>).baseUrl, undefined);
@@ -63,6 +68,12 @@ assert.equal(gateway.decide({ ...call, args: { command: 'ls' } }, rules).effect,
 const askBash = { Bash: 'ask' } as const;
 assert.equal(gateway.decide({ ...call, initiator: 'routine' as const }, [], askBash).effect, 'deny');
 assert.equal(gateway.decide({ ...call, initiator: 'routine-bot' as const }, [], askBash).effect, 'deny');
+// #2: webhook/folder/PR runs (and the Bots they ask) never get Bash; a plain routine can.
+assert.equal(gateway.untrustedShell({ ...call, initiator: 'event' as const }), true);
+assert.equal(gateway.untrustedShell({ ...call, initiator: 'event-bot' as const }), true);
+assert.equal(gateway.untrustedShell({ ...call, initiator: 'routine' as const }), false);
+assert.equal(gateway.untrustedShell({ ...call, name: 'Read', initiator: 'event' as const }), false);
+assert.equal(gateway.decide({ ...call, initiator: 'event' as const }, [], askBash).effect, 'deny');
 assert.equal(gateway.decide(call, [{ id: 'r3', effect: 'allow', tool: '*', match: '(' }], askBash).effect, 'ask');
 assert.equal(gateway.decide(call, [{ id: 'r4', effect: 'allow', tool: '*', botId: 'other' }], askBash).effect, 'ask');
 assert.equal(gateway.maskSecrets('token=abcd1234', ['abcd1234']), 'token=••••');

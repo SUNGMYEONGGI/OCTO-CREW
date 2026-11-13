@@ -194,7 +194,9 @@ The tools every Bot gets from the app, on top of the file, shell and web tools o
 - **Loopback only**: the webhook server and the per-turn MCP endpoint bind to `127.0.0.1`.
 - **A readable trail**: the activity log keeps the last 1,000 decisions with the rule that caused each.
 
-> **What it does not stop.** The account-write block covers MCP tools. A Bot runs on your Mac with full permissions by default, so it can still reach an outside API through the shell or HTTP, for example a brokerage or exchange. Do not keep keys to accounts that move money in a Bot's workspace, set 설정 › 컴퓨터 › 이 컴퓨터에서 실행 to 먼저 묻기, and add `deny` rules for such hosts.
+> **What it does not stop.** The account-write block covers MCP tools. A Bot can still reach an outside API through HTTP, or through the shell if you set 설정 › 컴퓨터 › 이 컴퓨터에서 실행 to 항상 허용, for example a brokerage or exchange. Do not keep keys to accounts that move money in a Bot's workspace, keep 이 컴퓨터에서 실행 on 먼저 묻기 (the default), and add `deny` rules for such hosts.
+
+> **Runs started from outside.** A routine fired by a webhook, folder change or pull request reads text someone else wrote, so it never runs shell commands, and neither do the Bots it asks for help. ChatGPT Bots never get Codex full access: 항상 허용 lets them write in their workspace with the network on, 먼저 묻기 the same with the network off, and outside-triggered runs only read.
 
 ## Configuration
 
@@ -214,8 +216,7 @@ Settings worth knowing:
 | Setting | Where | Default |
 | --- | --- | --- |
 | Provider and model | 설정 › 일반 | Claude subscription, default model |
-| 이 컴퓨터에서 실행 | 설정 › 컴퓨터 | 항상 허용 (`allow`) |
-| Full access | 설정 › 컴퓨터 | On |
+| 이 컴퓨터에서 실행 | 설정 › 컴퓨터 (first-run setup asks) | 먼저 묻기 (`ask`) |
 | Automatic review | 설정 › 컴퓨터 | On |
 | `blockAccountWrites` | `state.json` › `settings` | `true` |
 | Notifications, theme, accent, spellcheck, time zone, hardware acceleration | 설정 › 일반 | On, system, Bot color, on, auto, on |

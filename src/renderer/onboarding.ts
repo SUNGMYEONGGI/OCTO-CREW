@@ -1,14 +1,14 @@
 // First-run setup, in the same order as Grok Bot: welcome, sign in to the AI
-// accounts the bots run on (subscription or API key), the user's name, a starter
-// team, then a first task for the main bot. Finishing sets settings.onboarded.
+// accounts the bots run on (subscription or API key), the user's name, how much
+// the bots may do on this Mac, a starter team, then a first task for the main bot. Finishing sets settings.onboarded.
 import type { Broadcast, Conv } from '../shared/types';
 import { h, fill, act, icon, avatar, toast, type Child } from './ui';
 
 export type Template = { name: string; description: string };
 type Deps = { templates: Template[]; createTeam: (picked: Template[]) => Promise<void>; select: (convId: string) => void };
-type Step = 'welcome' | 'accounts' | 'name' | 'team' | 'task' | 'preparing';
+type Step = 'welcome' | 'accounts' | 'name' | 'access' | 'team' | 'task' | 'preparing';
 
-const STEPS: Step[] = ['welcome', 'accounts', 'name', 'team', 'task'];
+const STEPS: Step[] = ['welcome', 'accounts', 'name', 'access', 'team', 'task'];
 const TASKS = [
   '오늘 할 일을 정리해 줘',
   '내 작업 폴더에 메모장 파일을 하나 만들어 줘',
@@ -129,7 +129,7 @@ const VIEWS: Record<Step, () => Child[]> = {
     const go = async () => {
       const name = field.value.trim();
       if (name) await act('updateSettings', { userName: name });
-      show('team');
+      show('access');
     };
     field.onkeydown = (e) => { if (e.key === 'Enter' && !e.isComposing) go(); };
     return [
@@ -137,6 +137,26 @@ const VIEWS: Record<Step, () => Child[]> = {
       h('p', { class: 'ob-lede' }, 'Bot들이 이 이름으로 부르고, 그룹 채팅에서도 이 이름으로 보여요.'),
       field,
       h('div', { class: 'ob-actions' }, back('accounts'), h('button', { class: 'btn primary', onclick: go }, '계속')),
+    ];
+  },
+
+  // Bots read web pages, mail and messages, and any of them can carry instructions
+  // meant for the Bot. Full access stays an explicit choice.
+  access: () => {
+    const choose = async (v: 'ask' | 'allow') => {
+      await act('updateSettings', { computerAccess: v });
+      show('team');
+    };
+    return [
+      h('h2', null, 'Bot이 이 Mac에서 할 수 있는 일'),
+      h('p', { class: 'ob-lede' }, 'Bot은 명령을 실행하고 파일을 고칠 수 있어요. 웹 페이지나 메일 속 글이 Bot을 속여 명령을 실행하게 할 수도 있어서, 처음에는 실행 전에 물어보는 쪽을 권해요.'),
+      h('div', { class: 'ob-team' },
+        h('button', { class: 'ob-pick on', onclick: () => choose('ask') }, h('span', { class: 'ob-plus' }, icon('check', 16)),
+          h('div', { class: 'grow' }, h('b', null, '명령 실행 전에 묻기 (추천)'), h('span', null, '파일 읽기·쓰기는 바로 하고, 터미널 명령은 실행 전에 승인을 받아요. 루틴처럼 지켜보는 사람이 없을 때는 명령을 실행하지 않아요.'))),
+        h('button', { class: 'ob-pick', onclick: () => choose('allow') }, h('span', { class: 'ob-plus' }, icon('plus', 16)),
+          h('div', { class: 'grow' }, h('b', null, '항상 허용'), h('span', null, '묻지 않고 명령을 실행해요. 비밀번호·키·브라우저 데이터는 이때도 먼저 물어봐요.')))),
+      h('p', { class: 'ob-note' }, '설정 › 컴퓨터에서 언제든 바꿀 수 있어요.'),
+      h('div', { class: 'ob-actions' }, back('name')),
     ];
   },
 
@@ -154,7 +174,7 @@ const VIEWS: Record<Step, () => Child[]> = {
       h('h2', null, '함께 일할 Bot을 고르세요'),
       h('p', { class: 'ob-lede' }, '나중에 + 메뉴에서 언제든 더 만들 수 있어요.'),
       list,
-      h('div', { class: 'ob-actions' }, back('name'), h('button', { class: 'btn primary', onclick: () => show('task') }, '계속')),
+      h('div', { class: 'ob-actions' }, back('access'), h('button', { class: 'btn primary', onclick: () => show('task') }, '계속')),
     ];
   },
 

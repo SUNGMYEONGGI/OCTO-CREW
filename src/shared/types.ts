@@ -10,7 +10,13 @@ export const LEGACY_APP_TOOLS = 'mcp__characterbot__';
 
 export type Effect = 'allow' | 'ask' | 'deny';
 // routine-bot: a Bot doing work a routine handed it (nobody is watching either).
-export type Initiator = 'user' | 'bot' | 'routine' | 'routine-bot';
+// event: a routine fired by a webhook, folder change or PR, carrying text from
+// outside; event-bot: a Bot that run asked for help.
+export type Initiator = 'user' | 'bot' | 'routine' | 'routine-bot' | 'event' | 'event-bot';
+// Runs nobody is watching: "ask" fails closed.
+export const UNATTENDED: readonly Initiator[] = ['routine', 'routine-bot', 'event', 'event-bot'];
+// Runs that started from untrusted outside text.
+export const UNTRUSTED: readonly Initiator[] = ['event', 'event-bot'];
 
 export interface Memory {
   id: string;
