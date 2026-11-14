@@ -194,7 +194,7 @@ The tools every Bot gets from the app, on top of the file, shell and web tools o
 - **Loopback only**: the webhook server and the per-turn MCP endpoint bind to `127.0.0.1`.
 - **A readable trail**: the activity log keeps the last 1,000 decisions with the rule that caused each.
 
-> **What it does not stop.** The account-write block covers MCP tools. A Bot can still reach an outside API through HTTP, or through the shell if you set 설정 › 컴퓨터 › 이 컴퓨터에서 실행 to 항상 허용, for example a brokerage or exchange. Do not keep keys to accounts that move money in a Bot's workspace, keep 이 컴퓨터에서 실행 on 먼저 묻기 (the default), and add `deny` rules for such hosts.
+> **What it does not stop.** The account-write block covers MCP tools of claude.ai connectors and of any server signed in as you (remote/OAuth, or given a token), treating a tool as a write unless its name clearly reads. In Claude Bots' shell it also refuses AppleScript (`osascript`, Shortcuts), `gh` commands that change GitHub, and `curl`/`wget` calls that send data. It does not cover `git push`, other CLIs or ChatGPT Bots' shell. A Bot can still reach an outside API through HTTP, or through the shell if you set 설정 › 컴퓨터 › 이 컴퓨터에서 실행 to 항상 허용, for example a brokerage or exchange. Do not keep keys to accounts that move money in a Bot's workspace, keep 이 컴퓨터에서 실행 on 먼저 묻기 (the default), and add `deny` rules for such hosts.
 
 > **Runs started from outside.** A routine fired by a webhook, folder change or pull request reads text someone else wrote, so it never runs shell commands, and neither do the Bots it asks for help. ChatGPT Bots never get Codex full access: 항상 허용 lets them write in their workspace with the network on, 먼저 묻기 the same with the network off, and outside-triggered runs only read.
 

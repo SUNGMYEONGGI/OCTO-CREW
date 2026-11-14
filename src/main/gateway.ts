@@ -21,21 +21,52 @@ export interface Decision {
   rule?: Rule | null;
   reason?: string;
 }
-const APP_READ = /(^|[_-])(list|get|search|read|fetch|query|find|view|describe|lookup|check|status|whoami|me|info|retrieve|download|resolve|suggest)([_-]|$)/i;
+// An MCP tool counts as a read only when its verb is a read verb and no word in
+// its name is a write verb: notion-create-view, download_and_share and
+// get_or_create are writes. The service's own name (slack_, notion-) is skipped.
+// Anything unknown counts as a write.
+const READ_VERBS = new Set(['list', 'get', 'search', 'read', 'fetch', 'query', 'find', 'view', 'describe', 'lookup', 'retrieve', 'download', 'whoami', 'suggest', 'show', 'count', 'export']);
+const WRITE_WORDS = new Set(['create', 'update', 'delete', 'remove', 'send', 'share', 'post', 'add', 'set', 'write', 'edit', 'move', 'upload',
+  'archive', 'reply', 'respond', 'schedule', 'invite', 'publish', 'trash', 'copy', 'cancel', 'resolve', 'mark', 'react', 'modify', 'rename',
+  'insert', 'append', 'patch', 'put', 'submit', 'approve', 'merge', 'close', 'assign', 'draft', 'save', 'star', 'label', 'restore', 'duplicate',
+  'complete', 'unarchive', 'join', 'leave', 'kick', 'pin', 'unpin', 'forward', 'accept', 'decline', 'comment', 'transfer', 'pay', 'order', 'book']);
+function isRead(name: string): boolean {
+  const m = name.match(/^mcp__(.+?)__(.+)$/);
+  if (!m) return false;
+  const service = m[1].replace(/^claude_ai_/, '').toLowerCase().split(/[_-]/);
+  const words = m[2].toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const verbs = words.filter((w) => !service.includes(w));
+  return READ_VERBS.has(verbs[0]) && !words.some((w) => WRITE_WORDS.has(w));
+}
+
 function defaultEffect(call: Call, overrides: Record<string, Effect>): Effect {
   if (overrides[call.name]) return overrides[call.name];
-  if (call.name.startsWith('mcp__') && !call.name.startsWith(APP_TOOLS)) {
-    return APP_READ.test(call.name.replace(/^mcp__[^_]+(?:_[^_]+)*?__/, '')) ? 'allow' : 'ask';
-  }
+  if (call.name.startsWith('mcp__') && !call.name.startsWith(APP_TOOLS)) return isRead(call.name) ? 'allow' : 'ask';
   return 'allow';
 }
 
 // A write to an app tied to the user's own account: claude.ai connectors and
-// remote (URL/OAuth) servers. remote: tool-name slugs of remote servers.
-function accountWrite(name: string, remote: string[] = []): boolean {
+// servers signed in as the user (remote/OAuth, or given a token in env, headers
+// or args). accounts: tool-name slugs of those servers.
+function accountWrite(name: string, accounts: string[] = []): boolean {
   const m = name.match(/^mcp__(.+?)__(.+)$/);
-  if (!m || m[1] === APP_SERVER || APP_READ.test(m[2])) return false;
-  return m[1].startsWith('claude_ai_') || remote.includes(m[1]);
+  if (!m || m[1] === APP_SERVER || isRead(name)) return false;
+  return m[1].startsWith('claude_ai_') || accounts.includes(m[1]);
+}
+
+// A shell command that writes to an account outside the Mac: driving Mail,
+// Messages or another app through AppleScript, gh commands that change GitHub,
+// and curl/wget calls that send data (POST/PUT/PATCH/DELETE, -d, -F, --json).
+const GH_READ = /^(status|browse|search|help|version|auth\s+status|(pr|issue|repo|run|release|workflow|gist|label|project|secret|variable|cache|ruleset)\s+(list|view|status|diff|checks|watch|download)|api(?![^|;&]*\s(-X|--method)\s*(POST|PUT|PATCH|DELETE))(?![^|;&]*\s(-f|-F|--field|--raw-field|--input)\s))\b/i;
+function accountWriteCommand(command: string): boolean {
+  for (const part of command.split(/&&|\|\||[;|\n]/)) {
+    const cmd = part.trim().replace(/^(sudo|env(\s+\w+=\S*)*|command|exec|nohup)\s+/, '');
+    if (/^(osascript|automator|shortcuts\s+run)\b/.test(cmd)) return true;
+    const gh = cmd.match(/^gh\s+(.*)$/);
+    if (gh && !GH_READ.test(gh[1].trim())) return true;
+    if (/^(curl|wget|http|xh)\b/.test(cmd) && /\s(-X\s*|--request[\s=]+)(POST|PUT|PATCH|DELETE)\b|\s(-d|--data[\w-]*|-F|--form|--json|--upload-file|-T|--post-data|--post-file|--method[\s=]+(POST|PUT|PATCH|DELETE))[\s=]/i.test(` ${cmd}`)) return true;
+  }
+  return false;
 }
 
 // Credentials and private data a Bot never needs for normal work. Any built-in
@@ -145,4 +176,4 @@ function maskSecrets(text: unknown, secretValues: string[]): string {
   return out;
 }
 
-export { untrustedShell, accountWrite, sensitive, decide, finalize, combine, maskSecrets, globToRegExp };
+export { untrustedShell, accountWrite, accountWriteCommand, isRead, sensitive, decide, finalize, combine, maskSecrets, globToRegExp };
