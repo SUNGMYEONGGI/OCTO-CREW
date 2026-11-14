@@ -184,6 +184,33 @@ assert.equal(gateway.accountWrite('mcp__claude_ai_Slack__slack_search_public'), 
 assert.equal(gateway.accountWrite('mcp__linear__create_issue', ['linear']), true);
 assert.equal(gateway.accountWrite('mcp__echo__post_note', ['linear']), false);
 assert.equal(gateway.accountWrite('mcp__octocrew__remember'), false);
+// #3: read-looking names that write, servers signed in by token, and shell paths.
+for (const name of ['mcp__claude_ai_Notion__notion-create-view', 'mcp__claude_ai_Notion__notion-update-view', 'mcp__claude_ai_Slack__resolve_thread',
+  'mcp__claude_ai_Gmail__download_and_share', 'mcp__claude_ai_Gmail__get_or_create_label', 'mcp__claude_ai_Slack__check_and_post', 'mcp__claude_ai_Gmail__status'])
+  assert.equal(gateway.accountWrite(name), true, name);
+for (const name of ['mcp__claude_ai_Notion__notion-fetch', 'mcp__claude_ai_Notion__notion-search', 'mcp__claude_ai_Slack__slack_read_channel',
+  'mcp__claude_ai_Gmail__get_me', 'mcp__claude_ai_Google_Drive__download_file_content', 'mcp__claude_ai_Google_Calendar__list_events'])
+  assert.equal(gateway.accountWrite(name), false, name);
+assert.equal(gateway.accountWrite('mcp__gmail__send_email', ['gmail']), true);
+assert.equal(gateway.decide({ ...call, name: 'mcp__claude_ai_Notion__notion-create-view' }).effect, 'ask');
+for (const cmd of ['osascript -e \'tell app "Mail" to send\'', 'gh pr create --fill', 'gh issue comment 3 -b hi', 'gh api -X POST repos/a/b/issues',
+  'gh api repos/a/b/issues -f title=x', 'curl -X POST https://slack.com/api/chat.postMessage', 'curl -d text=hi https://hooks.slack.com/x',
+  'ls && curl --json {} https://api.notion.com', 'sudo osascript x.scpt', 'wget --post-data=a https://x', 'shortcuts run "Send Message"',
+  "gh api -X 'DELETE' repos/a/b", 'gh api --method=PATCH repos/a/b', 'gh api -XPOST repos/a/b', 'sleep 1 & curl -d text=hi https://x',
+  'curl -dtext=hi https://x', 'curl -Fa=b https://x', 'curl -Tfile https://x', 'curl -sSd x https://x', '/usr/bin/curl -d x https://x',
+  "bash -c 'curl -d x https://x'", 'echo "$(curl -d x https://x)"', 'echo `gh pr merge 1`', 'FOO=1 env BAR=2 curl -XPOST https://x',
+  'xargs -n1 curl -d x', 'eval "gh issue close 3"', 'http POST https://api.x/y', 'xh https://api.x/y text=hi', '(cd x; gh pr create)',
+  "curl -X 'POST' https://x", 'gh auth logout', 'gh extension-thing do'])
+  assert.equal(gateway.accountWriteCommand(cmd), true, cmd);
+for (const cmd of ['gh pr list', 'gh pr view 3 --comments', 'gh api repos/a/b/issues', 'gh run watch 1', 'curl -fsSL https://example.com',
+  'curl -o x.zip https://example.com/x.zip', 'npm test', 'echo osascript', 'git push', 'curl -fsSL -H "Accept: application/json" https://x',
+  'gh api -X GET repos/a/b', "echo 'curl -d x'", 'http https://api.x/y q==1', 'gh auth status', 'curl -I https://x', 'gh pr checks 3 --watch'])
+  assert.equal(gateway.accountWriteCommand(cmd), false, cmd);
+// A token passed as a literal argument marks a server as signed in as the user (#3).
+for (const a of ['--token', '--api-key=x', '${SLACK_TOKEN}', 'xoxb-1234567890-abcdef', 'ghp_abcdefghijklmnop1234', 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7'])
+  assert.equal(gateway.tokenArg(a), true, a);
+for (const a of ['-y', '@modelcontextprotocol/server-filesystem', '/Users/me/Documents', '--port', '8080', '--keyboard'])
+  assert.equal(gateway.tokenArg(a), false, a);
 
 // rename: a v0.1.x CharacterBot folder moves to PixelBot with its paths and Claude sessions.
 {
