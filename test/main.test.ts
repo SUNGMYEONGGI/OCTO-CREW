@@ -184,6 +184,22 @@ assert.equal(gateway.accountWrite('mcp__claude_ai_Slack__slack_search_public'), 
 assert.equal(gateway.accountWrite('mcp__linear__create_issue', ['linear']), true);
 assert.equal(gateway.accountWrite('mcp__echo__post_note', ['linear']), false);
 assert.equal(gateway.accountWrite('mcp__octocrew__remember'), false);
+// #3: read-looking names that write, servers signed in by token, and shell paths.
+for (const name of ['mcp__claude_ai_Notion__notion-create-view', 'mcp__claude_ai_Notion__notion-update-view', 'mcp__claude_ai_Slack__resolve_thread',
+  'mcp__claude_ai_Gmail__download_and_share', 'mcp__claude_ai_Gmail__get_or_create_label', 'mcp__claude_ai_Slack__check_and_post', 'mcp__claude_ai_Gmail__status'])
+  assert.equal(gateway.accountWrite(name), true, name);
+for (const name of ['mcp__claude_ai_Notion__notion-fetch', 'mcp__claude_ai_Notion__notion-search', 'mcp__claude_ai_Slack__slack_read_channel',
+  'mcp__claude_ai_Gmail__get_me', 'mcp__claude_ai_Google_Drive__download_file_content', 'mcp__claude_ai_Google_Calendar__list_events'])
+  assert.equal(gateway.accountWrite(name), false, name);
+assert.equal(gateway.accountWrite('mcp__gmail__send_email', ['gmail']), true);
+assert.equal(gateway.decide({ ...call, name: 'mcp__claude_ai_Notion__notion-create-view' }).effect, 'ask');
+for (const cmd of ['osascript -e \'tell app "Mail" to send\'', 'gh pr create --fill', 'gh issue comment 3 -b hi', 'gh api -X POST repos/a/b/issues',
+  'gh api repos/a/b/issues -f title=x', 'curl -X POST https://slack.com/api/chat.postMessage', 'curl -d text=hi https://hooks.slack.com/x',
+  'ls && curl --json {} https://api.notion.com', 'sudo osascript x.scpt', 'wget --post-data=a https://x', 'shortcuts run "Send Message"'])
+  assert.equal(gateway.accountWriteCommand(cmd), true, cmd);
+for (const cmd of ['gh pr list', 'gh pr view 3 --comments', 'gh api repos/a/b/issues', 'gh run watch 1', 'curl -fsSL https://example.com',
+  'curl -o x.zip https://example.com/x.zip', 'npm test', 'echo osascript', 'git push'])
+  assert.equal(gateway.accountWriteCommand(cmd), false, cmd);
 
 // rename: a v0.1.x CharacterBot folder moves to PixelBot with its paths and Claude sessions.
 {

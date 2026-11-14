@@ -438,12 +438,14 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
   const s = state.settings;
   // Hard stop: never write to apps linked to the user's real accounts (no rule,
   // draft or meeting card can lift it; only the setting can).
-  const remote = state.mcpServers.filter((sv) => sv.url).map((sv) => mcp.slug(sv.name));
+  const accounts = state.mcpServers.filter((sv) => sv.url || Object.keys(sv.env || {}).length || Object.keys(sv.headers || {}).length
+    || (sv.args || []).some((a) => a.includes('${'))).map((sv) => mcp.slug(sv.name));
   // Bash follows 설정 › 컴퓨터 › 이 컴퓨터에서 실행.
   // Webhook, folder and PR runs carry outside text and nobody watches them: no
   // Bash there, whatever the settings or any allow rule say.
   if (gateway.untrustedShell(call)) return gateway.finalize('ask', null, call);
-  if (s.blockAccountWrites !== false && gateway.accountWrite(call.name, remote)) {
+  const command = call.name === 'Bash' ? String(call.args.command ?? '') : '';
+  if (s.blockAccountWrites !== false && (gateway.accountWrite(call.name, accounts) || gateway.accountWriteCommand(command))) {
     return { effect: 'deny', reason: '사용자 계정과 연동된 앱(Slack, Gmail, 캘린더 등)에 쓰는 작업은 막혀 있습니다. 보내려던 내용은 채팅에 초안으로 보여주세요.' };
   }
   // Keys, keychains, browser profiles: ask unless the user's own rule decides.
