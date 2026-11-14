@@ -439,7 +439,7 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
   // Hard stop: never write to apps linked to the user's real accounts (no rule,
   // draft or meeting card can lift it; only the setting can).
   const accounts = state.mcpServers.filter((sv) => sv.url || Object.keys(sv.env || {}).length || Object.keys(sv.headers || {}).length
-    || (sv.args || []).some((a) => a.includes('${'))).map((sv) => mcp.slug(sv.name));
+    || (sv.args || []).some(gateway.tokenArg)).map((sv) => mcp.slug(sv.name));
   // Bash follows 설정 › 컴퓨터 › 이 컴퓨터에서 실행.
   // Webhook, folder and PR runs carry outside text and nobody watches them: no
   // Bash there, whatever the settings or any allow rule say.
