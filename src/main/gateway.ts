@@ -57,14 +57,103 @@ function accountWrite(name: string, accounts: string[] = []): boolean {
 // A shell command that writes to an account outside the Mac: driving Mail,
 // Messages or another app through AppleScript, gh commands that change GitHub,
 // and curl/wget calls that send data (POST/PUT/PATCH/DELETE, -d, -F, --json).
-const GH_READ = /^(status|browse|search|help|version|auth\s+status|(pr|issue|repo|run|release|workflow|gist|label|project|secret|variable|cache|ruleset)\s+(list|view|status|diff|checks|watch|download)|api(?![^|;&]*\s(-X|--method)\s*(POST|PUT|PATCH|DELETE))(?![^|;&]*\s(-f|-F|--field|--raw-field|--input)\s))\b/i;
+// ponytail: a small shell reader, not a full parser. It follows quotes, every
+// command separator, $(…)/`…`, sh -c, eval and xargs; anything stranger (aliases,
+// scripts written to disk first) gets past it. The real fence is 먼저 묻기.
+
+// Splits a command line into simple commands, each a list of unquoted words.
+function shellCommands(line: string): string[][] {
+  const out: string[][] = [];
+  let words: string[] = [], word = '', inWord = false, quote = '';
+  const endWord = () => { if (inWord) words.push(word); word = ''; inWord = false; };
+  const endCmd = () => { endWord(); if (words.length) out.push(words); words = []; };
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quote === "'") { if (c === "'") quote = ''; else word += c; continue; }
+    if (quote === '"') {
+      if (c === '"') quote = '';
+      else if (c === '\\' && i + 1 < line.length) word += line[++i];
+      else word += c;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; inWord = true; continue; }
+    if (c === '\\' && i + 1 < line.length) { word += line[++i]; inWord = true; continue; }
+    if (/\s/.test(c) && c !== '\n') { endWord(); continue; }
+    if (';&|\n()`'.includes(c) || (c === '$' && line[i + 1] === '(')) { endCmd(); if (c === '$') i++; continue; }
+    word += c; inWord = true;
+  }
+  endCmd();
+  // $(…) and `…` inside double quotes still run.
+  for (const m of line.matchAll(/\$\(([^()]*)\)|`([^`]*)`/g)) if (m[0] !== line) out.push(...shellCommands(m[1] ?? m[2]));
+  return out;
+}
+
+const PREFIX = new Set(['sudo', 'command', 'exec', 'nohup', 'time', 'nice', 'caffeinate', 'xargs', 'env', 'builtin', 'doas']);
+const WRITE_METHOD = /^(POST|PUT|PATCH|DELETE)$/i;
+// The value of -X/--request/--method, whether written -X POST, -XPOST or --method=POST.
+function methodOf(args: string[], short: string, long: string[]): string | null {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === short || long.includes(a)) return args[i + 1] ?? null;
+    if (a.startsWith(short) && !a.startsWith('--')) return a.slice(short.length);
+    const eq = long.find((l) => a.startsWith(`${l}=`));
+    if (eq) return a.slice(eq.length + 1);
+  }
+  return null;
+}
+const GH_GROUPS = new Set(['pr', 'issue', 'repo', 'run', 'release', 'workflow', 'gist', 'label', 'project', 'secret', 'variable', 'cache', 'ruleset', 'codespace', 'org', 'ssh-key', 'gpg-key']);
+const GH_READS = new Set(['list', 'view', 'status', 'diff', 'checks', 'watch', 'download']);
+function ghWrites(args: string[]): boolean {
+  const [sub, action] = args;
+  if (['status', 'browse', 'search', 'help', 'version', '--version', '--help'].includes(sub)) return false;
+  if (sub === 'auth') return action !== 'status' && action !== 'token';
+  if (GH_GROUPS.has(sub)) return !GH_READS.has(action);
+  if (sub === 'api') {
+    const method = methodOf(args, '-X', ['--method']);
+    if (method && !/^GET$/i.test(method)) return true;
+    return args.some((a) => /^(-[fF]|--field|--raw-field|--input)/.test(a));
+  }
+  return true; // anything else (extensions, aliases) may write
+}
+function curlSends(name: string, args: string[]): boolean {
+  if (name === 'http' || name === 'https' || name === 'xh') {
+    return args.some((a) => WRITE_METHOD.test(a) || /^[^-=:][^=:@]*(:=|=(?!=)|@)/.test(a) && !/^https?:\/\//.test(a));
+  }
+  const method = methodOf(args, '-X', ['--request', '--method']);
+  if (method && WRITE_METHOD.test(method)) return true;
+  return args.some((a) => /^--(data|form|json|upload-file|post-data|post-file)/.test(a)
+    || (name === 'curl' && /^-[a-zA-Z]*[dFT]/.test(a) && !a.startsWith('--')));
+}
+
+// A server argument that passes a credential: a ${SECRET} reference, a
+// --token/--api-key style flag, or a value shaped like a key.
+function tokenArg(arg: string): boolean {
+  return arg.includes('${') || /^--?[\w-]*(token|key|secret|password|passwd|auth|credential|bearer)\b/i.test(arg)
+    || /(^|=)(sk-|xox[abpors]-|gh[pousr]_|github_pat_|ntn_|secret_|glpat-|AKIA|ya29\.|AIza)\S{8,}/.test(arg)
+    || /(^|=)[A-Za-z0-9_\-]{32,}$/.test(arg) && /\d/.test(arg) && /[A-Za-z]/.test(arg);
+}
+
 function accountWriteCommand(command: string): boolean {
-  for (const part of command.split(/&&|\|\||[;|\n]/)) {
-    const cmd = part.trim().replace(/^(sudo|env(\s+\w+=\S*)*|command|exec|nohup)\s+/, '');
-    if (/^(osascript|automator|shortcuts\s+run)\b/.test(cmd)) return true;
-    const gh = cmd.match(/^gh\s+(.*)$/);
-    if (gh && !GH_READ.test(gh[1].trim())) return true;
-    if (/^(curl|wget|http|xh)\b/.test(cmd) && /\s(-X\s*|--request[\s=]+)(POST|PUT|PATCH|DELETE)\b|\s(-d|--data[\w-]*|-F|--form|--json|--upload-file|-T|--post-data|--post-file|--method[\s=]+(POST|PUT|PATCH|DELETE))[\s=]/i.test(` ${cmd}`)) return true;
+  for (let words of shellCommands(command)) {
+    // Skip VAR=value, wrappers like sudo/env/xargs and their flags.
+    for (;;) {
+      while (words.length && /^\w+=/.test(words[0])) words = words.slice(1);
+      if (!words.length || !PREFIX.has(path.basename(words[0]))) break;
+      words = words.slice(1);
+      while (words.length && words[0].startsWith('-')) words = words.slice(1);
+    }
+    if (!words.length) continue;
+    const name = path.basename(words[0]);
+    const args = words.slice(1);
+    if (['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'].includes(name)) {
+      const c = args.findIndex((a) => /^-\w*c$/.test(a));
+      if (c >= 0 && args[c + 1] && accountWriteCommand(args[c + 1])) return true;
+      continue;
+    }
+    if (name === 'eval' && accountWriteCommand(args.join(' '))) return true;
+    if (['osascript', 'automator', 'shortcuts'].includes(name)) return true;
+    if (name === 'gh' && ghWrites(args)) return true;
+    if (['curl', 'wget', 'http', 'https', 'xh'].includes(name) && curlSends(name, args)) return true;
   }
   return false;
 }
@@ -176,4 +265,4 @@ function maskSecrets(text: unknown, secretValues: string[]): string {
   return out;
 }
 
-export { untrustedShell, accountWrite, accountWriteCommand, isRead, sensitive, decide, finalize, combine, maskSecrets, globToRegExp };
+export { untrustedShell, accountWrite, accountWriteCommand, tokenArg, isRead, sensitive, decide, finalize, combine, maskSecrets, globToRegExp };
