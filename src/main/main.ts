@@ -1701,7 +1701,9 @@ const actions = {
   webhookCommand(id: string): string {
     const routine = findIn(state.routines, id);
     if (routine.schedule.type !== 'webhook') throw new Error('웹훅 루틴이 아니에요');
-    return `curl -X POST -H 'Authorization: Bearer ${webhookTokens()[id]}' -H 'Content-Type: text/plain' --data '내용' ${triggers.webhookUrl(routine.schedule.key)}`;
+    const token = webhookTokens()[id];
+    if (!token) throw new Error('웹훅 토큰을 저장하지 못했어요. macOS 키체인을 쓸 수 있는지 확인해 주세요');
+    return `curl -X POST -H 'Authorization: Bearer ${token}' -H 'Content-Type: text/plain' --data '내용' ${triggers.webhookUrl(routine.schedule.key)}`;
   },
   // New token; the old one stops working at once.
   rotateWebhookToken(id: string) {
