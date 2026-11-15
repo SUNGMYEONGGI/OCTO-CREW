@@ -148,7 +148,7 @@ function specs(ctx: ToolCtx): Spec[] {
       webhook: z.boolean().optional(), watch_path: z.string().optional(), github_repo: z.string().optional(),
     }, async (args) => {
       const r = ctx.createRoutine(args);
-      return `루틴을 만들었습니다 (${r.id})${r.schedule.type === 'webhook' ? `. 웹훅 주소: ${ctx.webhookUrl(r.schedule.key)} (이 컴퓨터에서만 POST로 호출 가능)` : ''}`;
+      return `루틴을 만들었습니다 (${r.id})${r.schedule.type === 'webhook' ? `. 웹훅 주소: ${ctx.webhookUrl(r.schedule.key)} (이 컴퓨터에서만 POST로 호출 가능, 인증 토큰은 사용자가 채팅 오른쪽 루틴 목록에서 복사합니다)` : ''}`;
     }),
     spec('message_bot', '다른 Bot에게 DM을 보내 일을 맡기거나 묻고, 그 Bot의 답을 받아옵니다.', {
       bot_name: z.string(), message: z.string(), attachments,
