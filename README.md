@@ -143,7 +143,7 @@ The app picks up your Claude Code login on first launch. If it does not, open �
 - **Long conversations stay usable**: when a new session would replay more than 40,000 characters of history, older messages are summarized with Haiku and the last 20 are kept verbatim. The summary is cached and refreshed after 40 more messages. 대화 압축 does it on demand.
 - **Routines on a clock**: daily at `HH:MM`, or every N minutes with a 15-minute floor. At most 20 enabled, and 10 failures in a row switch a routine off.
 - **Routines on events**:
-  - **Webhook**: `POST http://127.0.0.1:47819/hook/<key>` with any body (up to 64 KB). Loopback only; the key is 24 random hex characters.
+  - **Webhook**: `POST http://127.0.0.1:47819/hook/<key>` with `Authorization: Bearer <token>` and any body (up to 64 KB). Loopback only. The token lives encrypted in `secrets.bin`, never in the URL or the chat: copy a ready-made curl line with **호출 명령** in the chat's routine list, and **토큰 교체** makes a new one. Requests without it get `401`; web pages can't send it. The body reaches the Bot fenced off as outside data.
   - **Folder**: any change under a folder, recursively, debounced by 5 seconds.
   - **GitHub**: a pull request opened or updated in `owner/name`, polled every 5 minutes through `gh`. The first poll is a baseline.
 
