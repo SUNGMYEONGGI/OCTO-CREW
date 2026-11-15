@@ -34,15 +34,17 @@ const DEBOUNCE_MS = 5000;
 const GITHUB_POLL_MS = 5 * 60_000;
 
 let server: http.Server | null = null;
+let port = PORT; // the port actually bound (tests pass 0 for a free one)
+let listening: Promise<boolean> = Promise.resolve(false);
 let byKey = new Map<string, Routine>(); // webhook key -> routine
 let tokens: Record<string, string> = {}; // routine id -> bearer token (kept in secrets.bin, never in the URL)
 const watchers = new Map<string, Watch>(); // routine id -> watched folder
 const github = new Map<string, GithubPoll>(); // routine id -> PR snapshot
 
-const webhookUrl = (key: string): string => `http://127.0.0.1:${PORT}/hook/${key}`;
+const webhookUrl = (key: string): string => `http://127.0.0.1:${port}/hook/${key}`;
 
-function startServer(fire: Fire) {
-  server = http.createServer((req, res) => {
+function startServer(fire: Fire, want: number) {
+  const srv = http.createServer((req, res) => {
     const key = req.url?.match(/^\/hook\/([\w-]+)$/)?.[1];
     const routine = req.method === 'POST' && key ? byKey.get(key) : undefined;
     if (!routine) return void res.writeHead(404).end();
@@ -56,8 +58,15 @@ function startServer(fire: Fire) {
       fire(routine, `웹훅 요청 (${req.headers['content-type'] || 'text'}):\n${body.slice(0, 8000) || '(본문 없음)'}`);
     });
   });
-  server.on('error', () => { server = null; }); // port taken: webhooks just stay off
-  server.listen(PORT, '127.0.0.1');
+  server = srv;
+  // Resolves false when the port is taken: webhooks just stay off.
+  listening = new Promise((resolve) => {
+    srv.on('error', () => { if (server === srv) server = null; resolve(false); });
+    srv.listen(want, '127.0.0.1', () => {
+      port = (srv.address() as { port: number }).port;
+      resolve(true);
+    });
+  });
 }
 
 function authorized(header: string | undefined, token: string | undefined): boolean {
@@ -102,12 +111,12 @@ async function pollGithub(routine: Routine, entry: GithubPoll, fire: Fire) {
 }
 
 // Brings servers and watchers in line with the enabled event routines.
-function sync(routines: Routine[], fire: Fire, webhookTokens: Record<string, string> = {}): void {
+function sync(routines: Routine[], fire: Fire, webhookTokens: Record<string, string> = {}, want = PORT): void {
   tokens = webhookTokens;
   const live = routines.filter((r) => r.enabled && isEvent(r.schedule));
   byKey = new Map();
   for (const r of live) if (r.schedule.type === 'webhook') byKey.set(r.schedule.key, r);
-  if (byKey.size && !server) startServer(fire);
+  if (byKey.size && !server) startServer(fire, want);
   for (const [id, w] of watchers) {
     if (!live.some((r) => r.id === id && r.schedule.type === 'file' && r.schedule.path === w.path)) { w.watcher?.close(); clearTimeout(w.timer); watchers.delete(id); }
   }
@@ -131,4 +140,6 @@ function stop(): void {
   watchers.clear();
 }
 
-export { sync, stop, webhookUrl, status, authorized, PORT };
+const ready = (): Promise<boolean> => listening;
+
+export { sync, stop, ready, webhookUrl, status, authorized, PORT };
