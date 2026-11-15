@@ -1027,7 +1027,13 @@ function routinesSection(c: Conv): Child[] {
       h('div', { class: 'row' }, h('span', { class: 'grow' }, r.prompt), toggle(r.enabled, (v) => act('setRoutineEnabled', r.id, v))),
       h('div', { class: 'row small muted' },
         h('span', { class: 'grow' }, `${S.routineInfo?.[r.id]?.when || ''}${c.kind === 'group' ? ` · ${botById(r.botId)?.name}` : ''}${r.failures ? ` · 실패 ${r.failures}회` : ''}`, S.routineInfo?.[r.id]?.error ? h('span', { class: 'danger' }, ` · ${S.routineInfo[r.id].error}`) : null),
-        url(r) ? h('button', { class: 'btn ghost', title: url(r), onclick: () => { navigator.clipboard.writeText(url(r)); toast('웹훅 주소를 복사했어요'); } }, icon('copy', 14), ' 주소') : null,
+        url(r) ? h('button', { class: 'btn ghost', title: `${url(r)}\nAuthorization: Bearer 토큰이 필요해요`, onclick: async () => {
+          const cmd = await act('webhookCommand', r.id);
+          if (cmd) { navigator.clipboard.writeText(cmd); toast('토큰이 들어간 curl 명령을 복사했어요'); }
+        } }, icon('copy', 14), ' 호출 명령') : null,
+        url(r) ? h('button', { class: 'btn ghost', title: '지금 토큰을 버리고 새로 만들어요', onclick: async () => {
+          if (await act('rotateWebhookToken', r.id)) toast('새 토큰을 만들었어요. 이전 토큰은 더는 쓸 수 없어요');
+        } }, '토큰 교체') : null,
         h('button', { class: 'btn ghost', onclick: () => act('runRoutineNow', r.id) }, '지금 실행'),
         h('button', { class: 'x', onclick: () => act('deleteRoutine', r.id) }, '×'))))),
   ];

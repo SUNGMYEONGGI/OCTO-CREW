@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage, Notification, nativeTheme, nativeImage, systemPreferences } from 'electron';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { execFileSync, execFile } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -39,6 +40,7 @@ interface SecretStore {
   [name: string]: unknown;
   __oauth?: Record<string, OauthRecord>;
   __google_client?: { client_id: string; client_secret?: string };
+  __webhooks?: Record<string, string>; // routine id -> bearer token
 }
 type Tag = { threadOf?: string; viaBotId?: string };
 type ApprovalDone = (decision: 'allow' | 'deny' | 'always', args?: Record<string, unknown>) => void;
@@ -1131,8 +1133,23 @@ function fireEvent(routine: Routine, event: string): void {
   runRoutine(routine, conv, event);
 }
 
+// Each webhook routine has a bearer token in secrets.bin (made on first use).
+function webhookTokens(): Record<string, string> {
+  const secrets = readSecrets();
+  const saved = (secrets.__webhooks || {}) as Record<string, string>;
+  const ids = state.routines.filter((r) => r.schedule.type === 'webhook').map((r) => r.id);
+  const tokens = Object.fromEntries(ids.map((id) => [id, saved[id] || crypto.randomBytes(24).toString('base64url')]));
+  if (JSON.stringify(tokens) === JSON.stringify(saved)) return tokens;
+  try {
+    writeSecrets({ ...secrets, __webhooks: tokens });
+    return tokens;
+  } catch {
+    return saved; // can't store a new token: that webhook stays shut (401) rather than open
+  }
+}
+
 function syncTriggers() {
-  triggers.sync(state.routines, fireEvent);
+  triggers.sync(state.routines, fireEvent, webhookTokens());
 }
 
 async function runRoutine(routine: Routine, conv: Conv, event: string | null = null): Promise<void> {
@@ -1678,6 +1695,23 @@ const actions = {
   },
   deleteRoutine(id: string) {
     state.routines = state.routines.filter((r) => r.id !== id);
+    syncTriggers(); // drops its webhook token
+  },
+  // A ready-to-run curl line for a webhook routine (the token never goes to the model).
+  webhookCommand(id: string): string {
+    const routine = findIn(state.routines, id);
+    if (routine.schedule.type !== 'webhook') throw new Error('웹훅 루틴이 아니에요');
+    const token = webhookTokens()[id];
+    if (!token) throw new Error('웹훅 토큰을 저장하지 못했어요. macOS 키체인을 쓸 수 있는지 확인해 주세요');
+    return `curl -X POST -H 'Authorization: Bearer ${token}' -H 'Content-Type: text/plain' --data '내용' ${triggers.webhookUrl(routine.schedule.key)}`;
+  },
+  // New token; the old one stops working at once.
+  rotateWebhookToken(id: string) {
+    findIn(state.routines, id);
+    const secrets = readSecrets();
+    writeSecrets({ ...secrets, __webhooks: { ...(secrets.__webhooks as Record<string, string> || {}), [id]: crypto.randomBytes(24).toString('base64url') } });
+    syncTriggers();
+    return true;
   },
   runRoutineNow(id: string) {
     const routine = findIn(state.routines, id);
