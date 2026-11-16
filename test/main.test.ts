@@ -347,6 +347,24 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   assert.deepEqual(fs.readdirSync(projects), [`${key(to)}-bot-a`]);
   assert.equal(rename.moveWorkspaces(data, to, projects), false); // only once
 }
+// A Bot folder already in the new place merges; a clashing file stays put and so does that Bot's path.
+{
+  const data = path.join(tmp, 'merge-ws', 'OCTO CREW');
+  const to = `${data} Workspaces`;
+  for (const [bot, file] of [['bot_a', 'a.md'], ['bot_b', 'same.md']]) {
+    fs.mkdirSync(path.join(data, 'workspaces', bot), { recursive: true });
+    fs.writeFileSync(path.join(data, 'workspaces', bot, file), 'old');
+  }
+  fs.mkdirSync(path.join(to, 'bot_a'), { recursive: true }); // empty, from an earlier run
+  fs.mkdirSync(path.join(to, 'bot_b'), { recursive: true });
+  fs.writeFileSync(path.join(to, 'bot_b', 'same.md'), 'new');
+  fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ a: path.join(data, 'workspaces', 'bot_a'), b: path.join(data, 'workspaces', 'bot_b', 'same.md') }));
+  rename.moveWorkspaces(data, to, path.join(tmp, 'merge-ws', 'projects'));
+  assert.equal(fs.readFileSync(path.join(to, 'bot_a', 'a.md'), 'utf8'), 'old');
+  assert.equal(fs.readFileSync(path.join(to, 'bot_b', 'same.md'), 'utf8'), 'new');
+  assert.equal(fs.readFileSync(path.join(data, 'workspaces', 'bot_b', 'same.md'), 'utf8'), 'old');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')), { a: path.join(to, 'bot_a'), b: path.join(data, 'workspaces', 'bot_b', 'same.md') });
+}
 
 // Message search: every word, newest first, no tool entries or hidden briefs.
 {
