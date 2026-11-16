@@ -38,6 +38,58 @@ export function moveDataDir(from: string, to: string, claudeProjects = path.join
   return true;
 }
 
+// v0.4.6 moved Bot workspaces out of the data folder (<data>/workspaces/<bot>)
+// into a folder of their own, so nothing secret sits above a Bot's working
+// directory. Moves each Bot's folder, rewrites the paths in state.json and moves
+// the Claude sessions keyed by the old working directory. Returns true when it moved something.
+export function moveWorkspaces(dataDir: string, to: string, claudeProjects = path.join(os.homedir(), '.claude', 'projects')): boolean {
+  const from = path.join(dataDir, 'workspaces');
+  let names: string[];
+  try {
+    names = fs.readdirSync(from);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false; // nothing to move
+    throw err; // unreadable: stop before the app starts using an empty new folder
+  }
+  fs.mkdirSync(to, { recursive: true });
+  const moved: string[] = [];
+  for (const name of names) {
+    const src = path.join(from, name), dest = path.join(to, name);
+    if (!fs.existsSync(dest)) fs.renameSync(src, dest);
+    else if (fs.statSync(src).isDirectory()) {
+      // An earlier run (or an older app) already made this Bot's new folder: merge,
+      // keeping what's there, and leave any clash in the old folder.
+      for (const entry of fs.readdirSync(src)) if (!fs.existsSync(path.join(dest, entry))) fs.renameSync(path.join(src, entry), path.join(dest, entry));
+      try { fs.rmdirSync(src); } catch {}
+    }
+    if (!fs.existsSync(src)) moved.push(name);
+  }
+  try { fs.rmdirSync(from); } catch {} // left in place if anything couldn't move
+  // Only Bots whose folder fully moved point at the new place.
+  const stateFile = path.join(dataDir, 'state.json');
+  if (fs.existsSync(stateFile)) {
+    const esc = (p: string) => JSON.stringify(p).slice(1, -1);
+    let text = fs.readFileSync(stateFile, 'utf8');
+    for (const name of moved) {
+      for (const tail of [esc(path.sep), '"']) text = text.split(esc(path.join(from, name)) + tail).join(esc(path.join(to, name)) + tail);
+    }
+    fs.writeFileSync(stateFile, text);
+  }
+  const oldKey = `${projectKey(from)}-`;
+  const newKey = `${projectKey(to)}-`;
+  try {
+    for (const name of fs.readdirSync(claudeProjects)) {
+      if (!name.startsWith(oldKey)) continue;
+      const src = path.join(claudeProjects, name);
+      const dest = path.join(claudeProjects, newKey + name.slice(oldKey.length));
+      // The keys can differ only in case (…-workspaces- vs …-Workspaces-), which
+      // the default macOS volume sees as the same folder: rename it anyway.
+      if (!fs.existsSync(dest) || src.toLowerCase() === dest.toLowerCase()) fs.renameSync(src, dest);
+    }
+  } catch {}
+  return true;
+}
+
 // Decrypts a safeStorage blob written under the old app name. On macOS the key
 // is the "<name> Safe Storage" Keychain password (Chromium's v10 format:
 // AES-128-CBC, PBKDF2-SHA1 with salt "saltysalt", 1003 rounds, IV of spaces).

@@ -316,6 +316,56 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   no('Grep', { pattern: 'a..b', path: '.' });
 }
 
+// #95: workspaces in their own folder next to the data folder.
+{
+  const data = '/Users/a/Library/Application Support/OCTO CREW';
+  const workspaces = `${data} Workspaces`;
+  const w = { cwd: `${workspaces}/bot_1`, dataDir: data, home: '/Users/a', workspaces };
+  const yes = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), true, JSON.stringify(args));
+  const no = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), false, JSON.stringify(args));
+  no('Read', { file_path: 'notes/report.md' });
+  no('Read', { file_path: `${workspaces}/bot_1/report.md` }); // shares a prefix with the data folder
+  no('Read', { file_path: '../bot_2/draft.md' });
+  no('Bash', { command: `ls "${workspaces}/bot_2"` });
+  yes('Read', { file_path: '../../OCTO CREW/state.json' });
+  yes('Read', { file_path: `${data}/secrets.bin` });
+  yes('Bash', { command: `cat "${workspaces}/../OCTO CREW/state.json"` });
+}
+{
+  const data = path.join(tmp, 'move-ws', 'OCTO CREW');
+  const to = `${data} Workspaces`;
+  const projects = path.join(tmp, 'move-ws', 'projects');
+  fs.mkdirSync(path.join(data, 'workspaces', 'bot_a'), { recursive: true });
+  fs.writeFileSync(path.join(data, 'workspaces', 'bot_a', 'note.md'), 'hi');
+  fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ dir: path.join(data, 'workspaces', 'bot_a', 'x'), keep: path.join(data, 'icons', 'a.png') }));
+  const key = (p: string) => p.replace(/[^a-zA-Z0-9]/g, '-');
+  fs.mkdirSync(path.join(projects, `${key(data)}-workspaces-bot-a`), { recursive: true });
+  assert.equal(rename.moveWorkspaces(data, to, projects), true);
+  assert.equal(fs.readFileSync(path.join(to, 'bot_a', 'note.md'), 'utf8'), 'hi');
+  assert.equal(fs.existsSync(path.join(data, 'workspaces')), false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')), { dir: path.join(to, 'bot_a', 'x'), keep: path.join(data, 'icons', 'a.png') });
+  assert.deepEqual(fs.readdirSync(projects), [`${key(to)}-bot-a`]);
+  assert.equal(rename.moveWorkspaces(data, to, projects), false); // only once
+}
+// A Bot folder already in the new place merges; a clashing file stays put and so does that Bot's path.
+{
+  const data = path.join(tmp, 'merge-ws', 'OCTO CREW');
+  const to = `${data} Workspaces`;
+  for (const [bot, file] of [['bot_a', 'a.md'], ['bot_b', 'same.md']]) {
+    fs.mkdirSync(path.join(data, 'workspaces', bot), { recursive: true });
+    fs.writeFileSync(path.join(data, 'workspaces', bot, file), 'old');
+  }
+  fs.mkdirSync(path.join(to, 'bot_a'), { recursive: true }); // empty, from an earlier run
+  fs.mkdirSync(path.join(to, 'bot_b'), { recursive: true });
+  fs.writeFileSync(path.join(to, 'bot_b', 'same.md'), 'new');
+  fs.writeFileSync(path.join(data, 'state.json'), JSON.stringify({ a: path.join(data, 'workspaces', 'bot_a'), b: path.join(data, 'workspaces', 'bot_b', 'same.md') }));
+  rename.moveWorkspaces(data, to, path.join(tmp, 'merge-ws', 'projects'));
+  assert.equal(fs.readFileSync(path.join(to, 'bot_a', 'a.md'), 'utf8'), 'old');
+  assert.equal(fs.readFileSync(path.join(to, 'bot_b', 'same.md'), 'utf8'), 'new');
+  assert.equal(fs.readFileSync(path.join(data, 'workspaces', 'bot_b', 'same.md'), 'utf8'), 'old');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')), { a: path.join(to, 'bot_a'), b: path.join(data, 'workspaces', 'bot_b', 'same.md') });
+}
+
 // Message search: every word, newest first, no tool entries or hidden briefs.
 {
   const msg = (id: string, ts: number, content: string, extra: Partial<Message> = {}): Message => ({ id, ts, role: 'user', content, ...extra });

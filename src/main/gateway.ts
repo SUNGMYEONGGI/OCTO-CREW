@@ -168,9 +168,10 @@ const SENSITIVE = [
   /Library\/Application Support\/(Google\/Chrome|BraveSoftware|Microsoft Edge|Arc|Firefox|Vivaldi|com\.operasoftware)/, /Library\/Safari\b/, /Library\/Messages\b/, /Library\/Mail\b/,
   /\bsecrets\.bin\b/, /Application Support\/(OCTO CREW|PixelBot|CharacterBot)( Dev)?\/state\.json/,
 ];
-// Where the Bot runs: its workspace sits inside the app's data folder, so a
-// relative path (../../state.json) reaches the app's own files.
-export interface Where { cwd: string; dataDir: string; home: string }
+// Where the Bot runs. Since v0.4.6 workspaces live in their own folder next to
+// the app's data folder; older layouts kept them inside it, where a relative
+// path (../../state.json) reached the app's own files.
+export interface Where { cwd: string; dataDir: string; home: string; workspaces?: string }
 // Real path of the closest existing parent plus the rest, lower-cased: the
 // default macOS volume ignores case, so State.JSON is state.json.
 function real(p: string): string {
@@ -192,7 +193,7 @@ function sensitive(call: Call, where?: Where): boolean {
   if (where) {
     const data = real(where.dataDir);
     // Bots may read each other's workspaces (team members share files); the rest of the data folder is the app's.
-    const shared = path.join(data, 'workspaces');
+    const shared = real(where.workspaces || path.join(where.dataDir, 'workspaces'));
     text = text.replace(/(^|[\s"'=:])(~|\$HOME|\$\{HOME\})(?=\/|[\s"']|$)/g, `$1${where.home}`);
     const paths = ['path', 'file_path', 'notebook_path'].map((k) => (args as Record<string, unknown>)[k]).filter((v): v is string => typeof v === 'string' && v !== '')
       .map((v) => real(path.resolve(where.cwd, v.replace(/^~(?=\/|$)/, where.home))));
@@ -201,8 +202,10 @@ function sensitive(call: Call, where?: Where): boolean {
     const under = (p: string, dir: string) => p === dir || p.startsWith(dir + path.sep);
     if (paths.some((p) => under(p, data) && !under(p, shared))) return true;
     const lower = text.toLowerCase();
-    if ([data, where.dataDir.toLowerCase()].some((d) => lower.split(path.join(d, 'workspaces')).join('').includes(d))) return true;
-    // Paths are resolved above; in a command or pattern any step up leaves the workspace (it sits in the data folder).
+    // Workspace paths are fine even when they share a prefix with the data folder ("OCTO CREW Workspaces").
+    const rest = [shared, (where.workspaces || path.join(where.dataDir, 'workspaces')).toLowerCase()].reduce((t, w) => t.split(w).join(''), lower);
+    if ([data, where.dataDir.toLowerCase()].some((d) => rest.includes(d))) return true;
+    // Paths are resolved above; in a command or pattern any step up leaves the workspace.
     if (Object.entries(args).some(([k, v]) => typeof v === 'string' && !/^(content|new_string|old_string|description|prompt|path|file_path|notebook_path)$/.test(k) && /(^|[\s"'=/:;|&(])\.\.(\/|[\s"';|&)]|$)/.test(v))) return true;
     // Globs that spell a hidden folder in the home directory (~/.ss?/id_*).
     if (text.includes(`${where.home}/.`) && new RegExp(`${where.home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.[^/\\s"]*[?*[]`).test(text)) return true;
