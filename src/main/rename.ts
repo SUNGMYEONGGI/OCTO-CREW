@@ -45,14 +45,35 @@ export function moveDataDir(from: string, to: string, claudeProjects = path.join
 export function moveWorkspaces(dataDir: string, to: string, claudeProjects = path.join(os.homedir(), '.claude', 'projects')): boolean {
   const from = path.join(dataDir, 'workspaces');
   let names: string[];
-  try { names = fs.readdirSync(from); } catch { return false; }
+  try {
+    names = fs.readdirSync(from);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false; // nothing to move
+    throw err; // unreadable: stop before the app starts using an empty new folder
+  }
   fs.mkdirSync(to, { recursive: true });
-  for (const name of names) if (!fs.existsSync(path.join(to, name))) fs.renameSync(path.join(from, name), path.join(to, name));
+  const moved: string[] = [];
+  for (const name of names) {
+    const src = path.join(from, name), dest = path.join(to, name);
+    if (!fs.existsSync(dest)) fs.renameSync(src, dest);
+    else if (fs.statSync(src).isDirectory()) {
+      // An earlier run (or an older app) already made this Bot's new folder: merge,
+      // keeping what's there, and leave any clash in the old folder.
+      for (const entry of fs.readdirSync(src)) if (!fs.existsSync(path.join(dest, entry))) fs.renameSync(path.join(src, entry), path.join(dest, entry));
+      try { fs.rmdirSync(src); } catch {}
+    }
+    if (!fs.existsSync(src)) moved.push(name);
+  }
   try { fs.rmdirSync(from); } catch {} // left in place if anything couldn't move
+  // Only Bots whose folder fully moved point at the new place.
   const stateFile = path.join(dataDir, 'state.json');
   if (fs.existsSync(stateFile)) {
     const esc = (p: string) => JSON.stringify(p).slice(1, -1);
-    fs.writeFileSync(stateFile, fs.readFileSync(stateFile, 'utf8').split(esc(from) + esc(path.sep)).join(esc(to) + esc(path.sep)));
+    let text = fs.readFileSync(stateFile, 'utf8');
+    for (const name of moved) {
+      for (const tail of [esc(path.sep), '"']) text = text.split(esc(path.join(from, name)) + tail).join(esc(path.join(to, name)) + tail);
+    }
+    fs.writeFileSync(stateFile, text);
   }
   const oldKey = `${projectKey(from)}-`;
   const newKey = `${projectKey(to)}-`;
