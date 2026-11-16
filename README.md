@@ -72,6 +72,13 @@ curl -fsSL https://sungmyeonggi.github.io/OCTO-CREW/install.sh | sh
 
 Files downloaded with `curl` carry no quarantine flag, so macOS doesn't show the "Apple could not verify OCTO CREW" warning. The script is [`site/install.sh`](site/install.sh).
 
+The script checks the DMG's SHA-256, which only catches a damaged download because it comes from the same release. When the [GitHub CLI](https://cli.github.com) is installed and signed in, it also checks the build provenance that the release workflow signs with Sigstore, and refuses a DMG that wasn't built by it. Set `OCTOCREW_REQUIRE_PROVENANCE=1` to make that check required. To check a DMG you downloaded yourself:
+
+```sh
+gh attestation verify OCTO-CREW-arm64.dmg --repo SUNGMYEONGGI/OCTO-CREW \
+  --signer-workflow SUNGMYEONGGI/OCTO-CREW/.github/workflows/release.yml
+```
+
 To install by hand instead:
 
 1. Download [`OCTO-CREW-arm64.dmg`](https://github.com/SUNGMYEONGGI/OCTO-CREW/releases/latest/download/OCTO-CREW-arm64.dmg), the latest release (or pick one from [Releases](https://github.com/SUNGMYEONGGI/OCTO-CREW/releases)).
