@@ -45,6 +45,12 @@ interface SecretStore {
 type Tag = { threadOf?: string; viaBotId?: string };
 type ApprovalDone = (decision: 'allow' | 'deny' | 'always', args?: Record<string, unknown>) => void;
 
+// Bot workspaces sit next to the data folder, not inside it: a step up from a
+// Bot's folder reaches other Bots' folders, never state.json or secrets.bin.
+function workspacesDir(): string {
+  return path.join(app.getPath('appData'), `OCTO CREW${app.isPackaged ? '' : ' Dev'} Workspaces`);
+}
+
 // `npm start` keeps its data apart from the installed app, so a fresh install
 // starts at first-run setup instead of showing development chats. A PixelBot
 // (or v0.1.x CharacterBot) folder moves over on first launch.
@@ -52,6 +58,7 @@ type ApprovalDone = (decision: 'allow' | 'deny' | 'always', args?: Record<string
   const suffix = app.isPackaged ? '' : ' Dev';
   const dir = path.join(app.getPath('appData'), `OCTO CREW${suffix}`);
   for (const old of rename.LEGACY_NAMES) rename.moveDataDir(path.join(app.getPath('appData'), `${old}${suffix}`), dir);
+  rename.moveWorkspaces(dir, workspacesDir());
   app.setPath('userData', dir);
 }
 
@@ -70,7 +77,7 @@ const dataDir = () => app.getPath('userData');
 const stateFile = () => path.join(dataDir(), 'state.json');
 const secretsFile = () => path.join(dataDir(), 'secrets.bin');
 const workspace = (botId: string): string => {
-  const dir = path.join(dataDir(), 'workspaces', botId);
+  const dir = path.join(workspacesDir(), botId);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 };
@@ -433,7 +440,7 @@ function finishTool(conv: Conv, bot: Bot, toolMsg: Message, output: string, isEr
 // Auto-review: explicit "always allow" rules, then the user's natural-language
 // rules (judged by a small model), then per-tool defaults. Off = allow all.
 const judgeCache = new Map<string, number[]>();
-const where = (botId?: string): gateway.Where | undefined => (botId ? { cwd: workspace(botId), dataDir: dataDir(), home: os.homedir() } : undefined);
+const where = (botId?: string): gateway.Where | undefined => (botId ? { cwd: workspace(botId), dataDir: dataDir(), home: os.homedir(), workspaces: workspacesDir() } : undefined);
 // Tools that rewrite a Bot's instructions/model or start work later on their own.
 const CONFIG_TOOLS = new RegExp(`^${APP_TOOLS}(update_bot|schedule_routine)$`);
 async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effect; reason?: string; rule?: Rule | null }> {
@@ -1736,7 +1743,7 @@ const actions = {
   },
   // Wipes every bot's workspace (its files). The renderer confirms first.
   resetComputers() {
-    fs.rmSync(path.join(dataDir(), 'workspaces'), { recursive: true, force: true });
+    fs.rmSync(workspacesDir(), { recursive: true, force: true });
     for (const c of state.convs) c.sessions = {};
   },
   addReviewRule(when: string, effect: Effect) {
