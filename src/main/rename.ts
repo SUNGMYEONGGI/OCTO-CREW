@@ -38,6 +38,37 @@ export function moveDataDir(from: string, to: string, claudeProjects = path.join
   return true;
 }
 
+// v0.4.6 moved Bot workspaces out of the data folder (<data>/workspaces/<bot>)
+// into a folder of their own, so nothing secret sits above a Bot's working
+// directory. Moves each Bot's folder, rewrites the paths in state.json and moves
+// the Claude sessions keyed by the old working directory. Returns true when it moved something.
+export function moveWorkspaces(dataDir: string, to: string, claudeProjects = path.join(os.homedir(), '.claude', 'projects')): boolean {
+  const from = path.join(dataDir, 'workspaces');
+  let names: string[];
+  try { names = fs.readdirSync(from); } catch { return false; }
+  fs.mkdirSync(to, { recursive: true });
+  for (const name of names) if (!fs.existsSync(path.join(to, name))) fs.renameSync(path.join(from, name), path.join(to, name));
+  try { fs.rmdirSync(from); } catch {} // left in place if anything couldn't move
+  const stateFile = path.join(dataDir, 'state.json');
+  if (fs.existsSync(stateFile)) {
+    const esc = (p: string) => JSON.stringify(p).slice(1, -1);
+    fs.writeFileSync(stateFile, fs.readFileSync(stateFile, 'utf8').split(esc(from) + esc(path.sep)).join(esc(to) + esc(path.sep)));
+  }
+  const oldKey = `${projectKey(from)}-`;
+  const newKey = `${projectKey(to)}-`;
+  try {
+    for (const name of fs.readdirSync(claudeProjects)) {
+      if (!name.startsWith(oldKey)) continue;
+      const src = path.join(claudeProjects, name);
+      const dest = path.join(claudeProjects, newKey + name.slice(oldKey.length));
+      // The keys can differ only in case (…-workspaces- vs …-Workspaces-), which
+      // the default macOS volume sees as the same folder: rename it anyway.
+      if (!fs.existsSync(dest) || src.toLowerCase() === dest.toLowerCase()) fs.renameSync(src, dest);
+    }
+  } catch {}
+  return true;
+}
+
 // Decrypts a safeStorage blob written under the old app name. On macOS the key
 // is the "<name> Safe Storage" Keychain password (Chromium's v10 format:
 // AES-128-CBC, PBKDF2-SHA1 with salt "saltysalt", 1003 rounds, IV of spaces).

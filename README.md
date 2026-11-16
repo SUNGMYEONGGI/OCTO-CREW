@@ -213,10 +213,11 @@ Everything is set in the app; there is no `.env`. What is stored where:
 | --- | --- |
 | `state.json` | Settings, Bots, chats, memories, skills, routines, rules, activity log, usage. |
 | `secrets.bin` | Tokens and keys, encrypted with `safeStorage`. |
-| `workspaces/<botId>/` | Each Bot's folder, its working directory. |
 | `codex/` | The app-private `CODEX_HOME` for ChatGPT Bots. |
 | `icons/`, `codex-inbox/` | Generated images and their inputs. |
 | `bin/stt` | The compiled speech recognition helper. |
+
+Each Bot's working folder is `~/Library/Application Support/OCTO CREW Workspaces/<botId>/`, next to the data folder rather than inside it, so a step up from a Bot's folder reaches other Bots' folders, never `state.json` or `secrets.bin`. v0.4.6 moves older `workspaces/` folders there on first launch, with their Claude sessions.
 
 Settings worth knowing:
 
