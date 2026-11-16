@@ -22,7 +22,7 @@ curl -fsL "$URL.sha256" -o "$TMP/app.dmg.sha256" || { echo "Couldn't download th
 # build provenance is signed by the release workflow itself (Sigstore): check it
 # whenever the GitHub CLI is signed in, and refuse a DMG that fails it.
 REPO=SUNGMYEONGGI/OCTO-CREW
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+if command -v gh >/dev/null 2>&1 && gh auth status --active --hostname github.com >/dev/null 2>&1; then
   echo "Checking the build provenance..."
   gh attestation verify "$TMP/app.dmg" --repo "$REPO" --signer-workflow "$REPO/.github/workflows/release.yml" >/dev/null \
     || { echo "This DMG was not built by OCTO CREW's release workflow. Not installing." >&2; exit 1; }
