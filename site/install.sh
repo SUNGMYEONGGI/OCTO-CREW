@@ -18,6 +18,20 @@ curl -fL --progress-bar "$URL" -o "$TMP/app.dmg" || { URL="$LATEST/PixelBot-arm6
 # The release publishes the DMG's SHA-256 next to it; refuse a download that doesn't match.
 curl -fsL "$URL.sha256" -o "$TMP/app.dmg.sha256" || { echo "Couldn't download the checksum." >&2; exit 1; }
 [ "$(shasum -a 256 "$TMP/app.dmg" | cut -d' ' -f1)" = "$(cut -d' ' -f1 "$TMP/app.dmg.sha256")" ] || { echo "Checksum mismatch: the download is damaged or was changed." >&2; exit 1; }
+# The checksum sits next to the DMG, so it only catches a damaged download. The
+# build provenance is signed by the release workflow itself (Sigstore): check it
+# whenever the GitHub CLI is signed in, and refuse a DMG that fails it.
+REPO=SUNGMYEONGGI/OCTO-CREW
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  echo "Checking the build provenance..."
+  gh attestation verify "$TMP/app.dmg" --repo "$REPO" --signer-workflow "$REPO/.github/workflows/release.yml" >/dev/null \
+    || { echo "This DMG was not built by OCTO CREW's release workflow. Not installing." >&2; exit 1; }
+  echo "Built by $REPO's release workflow."
+elif [ "${OCTOCREW_REQUIRE_PROVENANCE:-}" = 1 ]; then
+  echo "OCTOCREW_REQUIRE_PROVENANCE=1 needs the GitHub CLI, signed in (gh auth login)." >&2; exit 1
+else
+  echo "Note: install the GitHub CLI and run 'gh auth login' to also check that this build came from OCTO CREW's release workflow."
+fi
 hdiutil attach -quiet -nobrowse -mountpoint "$MNT" "$TMP/app.dmg"
 APP=$(ls -d "$MNT"/*.app | head -n 1)
 NAME=$(basename "$APP")

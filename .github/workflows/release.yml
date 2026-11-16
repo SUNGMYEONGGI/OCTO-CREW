@@ -16,6 +16,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write      # signs the build provenance with this workflow's identity
+  attestations: write
 
 concurrency:
   group: release
@@ -58,6 +60,14 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Sigstore-signed build provenance for the DMG and zip, tied to this workflow
+      # on this repo. A stolen token can replace a release and its .sha256, but
+      # not forge this; install.sh checks it when gh is signed in.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/OCTO-CREW-arm64.dmg
+            dist/*.zip
       - name: Publish release
         run: |
           # PixelBot-arm64.dmg is the same file under the old name, so links and
