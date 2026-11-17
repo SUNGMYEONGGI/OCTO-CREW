@@ -369,6 +369,10 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   assert.deepEqual(fs.readdirSync(projects), [`${key(ws)}-bot-a`]);
 }
 // A missing old Keychain item is "nothing to import", not a failure (no prompt either).
+assert.equal(rename.keychainResult(null, 'pw\n'), 'pw');
+assert.equal(rename.keychainResult(Object.assign(new Error('not found'), { code: 44 }), ''), null);
+assert.throws(() => rename.keychainResult(Object.assign(new Error('User canceled'), { code: 128 }), ''));
+assert.throws(() => rename.keychainResult(Object.assign(new Error('timeout'), { killed: true, signal: 'SIGTERM', code: null }), ''));
 const keychainDone = process.platform === 'darwin' ? rename.legacyPassword('OCTO CREW Test 91 Missing').then((p) => assert.equal(p, null)) : Promise.resolve();
 // A Bot folder already in the new place merges; a clashing file stays put and so does that Bot's path.
 {
