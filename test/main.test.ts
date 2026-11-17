@@ -347,6 +347,29 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   assert.deepEqual(fs.readdirSync(projects), [`${key(to)}-bot-a`]);
   assert.equal(rename.moveWorkspaces(data, to, projects), false); // only once
 }
+// #91: PixelBot 0.3.x straight to the current build runs both moves in order:
+// data folder first, then workspaces out of it. Paths and Claude sessions follow.
+{
+  const root = path.join(tmp, 'upgrade-91');
+  const from = path.join(root, 'PixelBot');
+  const data = path.join(root, 'OCTO CREW');
+  const ws = `${data} Workspaces`;
+  const projects = path.join(root, 'projects');
+  const key = (p: string) => p.replace(/[^a-zA-Z0-9]/g, '-');
+  fs.mkdirSync(path.join(from, 'workspaces', 'bot_a'), { recursive: true });
+  fs.writeFileSync(path.join(from, 'workspaces', 'bot_a', 'note.md'), 'hi');
+  fs.writeFileSync(path.join(from, 'secrets.bin'), 'v10blob');
+  fs.writeFileSync(path.join(from, 'state.json'), JSON.stringify({ cwd: path.join(from, 'workspaces', 'bot_a'), icon: path.join(from, 'icons', 'a.png') }));
+  fs.mkdirSync(path.join(projects, `${key(from)}-workspaces-bot-a`), { recursive: true });
+  assert.equal(rename.moveDataDir(from, data, projects), true);
+  assert.equal(rename.moveWorkspaces(data, ws, projects), true);
+  assert.equal(fs.readFileSync(path.join(ws, 'bot_a', 'note.md'), 'utf8'), 'hi');
+  assert.equal(fs.readFileSync(path.join(data, 'secrets.bin'), 'utf8'), 'v10blob');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(data, 'state.json'), 'utf8')), { cwd: path.join(ws, 'bot_a'), icon: path.join(data, 'icons', 'a.png') });
+  assert.deepEqual(fs.readdirSync(projects), [`${key(ws)}-bot-a`]);
+}
+// A missing old Keychain item is "nothing to import", not a failure (no prompt either).
+const keychainDone = process.platform === 'darwin' ? rename.legacyPassword('OCTO CREW Test 91 Missing').then((p) => assert.equal(p, null)) : Promise.resolve();
 // A Bot folder already in the new place merges; a clashing file stays put and so does that Bot's path.
 {
   const data = path.join(tmp, 'merge-ws', 'OCTO CREW');
@@ -474,4 +497,4 @@ const webhookDone = (async () => {
   triggers.stop();
 })();
 
-Promise.all([xlsxDone, updateDone, webhookDone]).then(() => console.log('ok'));
+Promise.all([xlsxDone, updateDone, webhookDone, keychainDone]).then(() => console.log('ok'));
