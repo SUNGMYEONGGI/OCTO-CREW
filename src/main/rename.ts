@@ -105,10 +105,16 @@ export function decryptLegacy(blob: Buffer, password: string | null): string | n
 }
 
 // Reads an old Keychain password without blocking the app; macOS asks the user
-// once to let OCTO CREW read the PixelBot (or CharacterBot) item.
+// once to let OCTO CREW read the PixelBot (or CharacterBot) item. Null when there
+// is no such item (exit 44). Any other failure (Deny, timeout) rejects, so a
+// refusal doesn't open the next item's prompt right after; 다시 시도 asks again.
 export function legacyPassword(name = LEGACY_NAME): Promise<string | null> {
   if (process.platform !== 'darwin') return Promise.resolve(null);
-  return new Promise((resolve) => {
-    execFile('security', ['find-generic-password', '-w', '-s', `${name} Safe Storage`], { timeout: 120000 }, (err, out) => resolve(err ? null : String(out).trim()));
+  return new Promise((resolve, reject) => {
+    execFile('security', ['find-generic-password', '-w', '-s', `${name} Safe Storage`], { timeout: 120000 }, (err, out) => {
+      if (!err) resolve(String(out).trim());
+      else if ((err as { code?: unknown }).code === 44) resolve(null);
+      else reject(err);
+    });
   });
 }
