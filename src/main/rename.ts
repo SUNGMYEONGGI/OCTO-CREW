@@ -112,9 +112,14 @@ export function legacyPassword(name = LEGACY_NAME): Promise<string | null> {
   if (process.platform !== 'darwin') return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     execFile('security', ['find-generic-password', '-w', '-s', `${name} Safe Storage`], { timeout: 120000 }, (err, out) => {
-      if (!err) resolve(String(out).trim());
-      else if ((err as { code?: unknown }).code === 44) resolve(null);
-      else reject(err);
+      try { resolve(keychainResult(err, out)); } catch (e) { reject(e); }
     });
   });
+}
+
+// `security` exits 44 when the item doesn't exist; anything else (Deny, timeout) throws.
+export function keychainResult(err: (Error & { code?: unknown }) | null, out: unknown): string | null {
+  if (!err) return String(out).trim();
+  if (err.code === 44) return null;
+  throw err;
 }
