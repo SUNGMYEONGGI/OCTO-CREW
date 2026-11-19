@@ -168,6 +168,20 @@ const SENSITIVE = [
   /Library\/Application Support\/(Google\/Chrome|BraveSoftware|Microsoft Edge|Arc|Firefox|Vivaldi|com\.operasoftware)/, /Library\/Safari\b/, /Library\/Messages\b/, /Library\/Mail\b/,
   /\bsecrets\.bin\b/, /Application Support\/(OCTO CREW|PixelBot|CharacterBot)( Dev)?\/state\.json/,
 ];
+// The same places as absolute paths, for sandboxes that deny reads by path
+// (Codex Bots, #105). Keep in step with SENSITIVE.
+function secretPaths(home: string, dataDir: string): string[] {
+  const lib = path.join(home, 'Library');
+  const support = path.join(lib, 'Application Support');
+  return [
+    ...['.ssh', '.gnupg', '.aws', '.netrc', '.npmrc', '.pypirc', '.docker/config.json', '.kube', '.config/gh', '.config/gcloud',
+      '.config/octocrew', '.config/characterbot', '.claude.json', '.codex'].map((p) => path.join(home, p)),
+    ...['Keychains', 'Cookies', 'Safari', 'Messages', 'Mail'].map((p) => path.join(lib, p)),
+    ...['Google/Chrome', 'BraveSoftware', 'Microsoft Edge', 'Arc', 'Firefox', 'Vivaldi', 'com.operasoftware.Opera'].map((p) => path.join(support, p)),
+    '/Library/Keychains', dataDir, // the app's own state.json, secrets.bin, Codex login
+  ];
+}
+
 // Where the Bot runs. Since v0.4.6 workspaces live in their own folder next to
 // the app's data folder; older layouts kept them inside it, where a relative
 // path (../../state.json) reached the app's own files.
@@ -268,4 +282,4 @@ function maskSecrets(text: unknown, secretValues: string[]): string {
   return out;
 }
 
-export { untrustedShell, accountWrite, accountWriteCommand, tokenArg, isRead, sensitive, decide, finalize, combine, maskSecrets, globToRegExp };
+export { untrustedShell, accountWrite, accountWriteCommand, tokenArg, isRead, sensitive, secretPaths, decide, finalize, combine, maskSecrets, globToRegExp };

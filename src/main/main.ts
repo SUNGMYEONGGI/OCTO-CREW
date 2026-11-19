@@ -794,7 +794,8 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
     // Codex runs with approvalPolicy 'never', so the gateway can't ask before its
     // commands: it never gets full access. 항상 허용 writes in the workspace with
     // the network on; 먼저 묻기 the same without network; a run started by outside
-    // text (webhook, folder, PR) or 허용 안 함 only reads.
+    // text (webhook, folder, PR) or 허용 안 함 only reads. In every mode commands
+    // can't read keys, browser data or the app's data folder (#105).
     const access = UNTRUSTED.includes(initiator) ? 'deny' : state.settings.computerAccess;
     const sandbox = ({ allow: 'workspace-write', ask: 'workspace-write', deny: 'read-only' } as const satisfies Record<Effect, SandboxMode>)[access] || 'read-only';
     const network = access === 'allow';
@@ -810,6 +811,7 @@ async function botTurn(conv: Conv, bot: Bot, initiator: Initiator, signal: Abort
         home: codexHome(), threadId: session.id, prompt: text, images: files, cwd: ws, model: model.slice('openai:'.length),
         instructions: `${systemPrompt(bot, conv)}\n\n(이 실행 환경에서는 octocrew MCP 서버의 도구(ask_user, remember, message_bot 등)만 쓸 수 있고, 사용자 계정과 연동된 앱은 없습니다.)`,
         sandbox, network, additionalDirectories: conv.kind === 'group' ? conv.botIds.filter((id) => id !== bot.id && findBot(id)).map((id) => workspace(id)) : [],
+        denyRead: gateway.secretPaths(os.homedir(), dataDir()),
         appTools, signal, on,
       });
     } finally {
