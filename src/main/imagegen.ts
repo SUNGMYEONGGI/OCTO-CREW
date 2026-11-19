@@ -121,7 +121,9 @@ browser_use = false
 browser_use_external = false
 in_app_browser = false
 memories = false
+shell_snapshot = false
 `;
+// shell_snapshot: snapshots live in CODEX_HOME, which commands may not read (#105).
 
 // Bots get their own CODEX_HOME so the user's Codex setup (AGENTS.md, plugins,
 // MCP servers, hooks) stays out. The login is shared: auth.json is a symlink to
@@ -154,12 +156,27 @@ export interface CodexTurn {
   sandbox: SandboxMode;
   network: boolean; // shell commands may reach the network (web search is separate)
   additionalDirectories: string[];
+  denyRead: string[]; // paths shell commands may not read (keys, browser data, the app's data folder)
   appTools?: AppTools;
   signal: AbortSignal;
   on: (event: ThreadEvent) => void;
 }
 
-async function runTurn({ home, threadId, prompt, images, cwd, model, instructions, sandbox, network, additionalDirectories, appTools, signal, on }: CodexTurn): Promise<string | null> {
+// Codex's built-in sandboxes let commands read anywhere, and with approvalPolicy
+// 'never' the gateway never sees them (#105). A permission profile reads the
+// whole disk except denyRead, writes only the workspace, teammates' folders and
+// temp dirs (read-only: nothing), and turns the network on or off. Passed as one
+// inline table: dotted -c keys can't spell paths. --sandbox would override it.
+function permissionProfile({ sandbox, network, additionalDirectories, denyRead }: Pick<CodexTurn, 'sandbox' | 'network' | 'additionalDirectories' | 'denyRead'>): string[] {
+  const access = sandbox === 'read-only' ? 'read' : 'write';
+  const q = JSON.stringify; // a TOML basic string
+  const fsEntries = [`":root"="read"`, ...(access === 'write' ? [`":tmpdir"="write"`, `":slash_tmp"="write"`] : []),
+    ...additionalDirectories.map((d) => `${q(d)}=${q(access)}`), ...denyRead.map((d) => `${q(d)}="deny"`),
+    `":workspace_roots"={"."=${q(access)}}`];
+  return ['default_permissions="octocrew"', `permissions.octocrew={filesystem={${fsEntries.join(', ')}}, network={enabled=${network}}}`];
+}
+
+async function runTurn({ home, threadId, prompt, images, cwd, model, instructions, sandbox, network, additionalDirectories, denyRead, appTools, signal, on }: CodexTurn): Promise<string | null> {
   const { Codex } = await import('@openai/codex-sdk');
   const config: NonNullable<CodexOptions['config']> = { developer_instructions: instructions };
   if (appTools) {
@@ -171,11 +188,9 @@ async function runTurn({ home, threadId, prompt, images, cwd, model, instruction
     codexPathOverride: codexBin(),
     env: { ...process.env, CODEX_HOME: botHome(home), ...(appTools ? { OCTOCREW_TOOLS_TOKEN: appTools.token } : {}) },
     config,
+    configOverrides: permissionProfile({ sandbox, network, additionalDirectories, denyRead }),
   });
-  const opts: ThreadOptions = {
-    model, workingDirectory: cwd, skipGitRepoCheck: true, sandboxMode: sandbox, approvalPolicy: 'never',
-    networkAccessEnabled: network, webSearchMode: 'live', additionalDirectories,
-  };
+  const opts: ThreadOptions = { model, workingDirectory: cwd, skipGitRepoCheck: true, approvalPolicy: 'never', webSearchMode: 'live' };
   const thread = threadId ? codex.resumeThread(threadId, opts) : codex.startThread(opts);
   const input: UserInput[] = [{ type: 'text', text: prompt || '(첨부 파일)' }, ...images.map((p) => ({ type: 'local_image' as const, path: p }))];
   const { events } = await thread.runStreamed(input, { signal });
@@ -226,4 +241,4 @@ function usage(home: string): Promise<ChatgptUsage> {
   });
 }
 
-export { status, login, loginWithKey, logout, generate, models, runTurn, usage };
+export { status, login, loginWithKey, logout, generate, models, runTurn, permissionProfile, usage };
