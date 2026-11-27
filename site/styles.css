@@ -275,17 +275,17 @@ main > .sdk, main > .install { background: var(--band); }
 .inst-right p { color: var(--muted); margin: 14px 0 0; }
 .cmd { display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 18px; border-radius: 16px; background: #161618; color: #f2f2f4; box-shadow: 0 12px 30px -16px rgba(0, 0, 0, .5); margin-top: 14px; }
 .cmd code { flex: 1; min-width: 0; background: none; padding: 0; color: inherit; font-size: 13.5px; line-height: 1.6; }
-.cmd code span { color: rgba(255, 255, 255, .4); margin-right: 6px; }
+.cmd code::before { content: '$'; color: rgba(255, 255, 255, .4); margin-right: 8px; }
 .copy { flex: none; font: 600 13px var(--text); color: #fff; background: rgba(255, 255, 255, .12); border: 0; border-radius: 999px; padding: 7px 14px; cursor: pointer; }
 .copy:hover { background: rgba(255, 255, 255, .2); }
 .why { padding: 18px 20px; border-radius: 16px; background: var(--card); box-shadow: var(--ring); }
 .why p { margin: 6px 0 0; font-size: 15px; }
 .steps { margin: 18px 0 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 4px; }
 .steps li { counter-increment: s; }
-.steps button { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 26px 1fr; gap: 6px; width: 100%; padding: 10px 12px; border-radius: 12px; cursor: pointer; color: var(--muted); opacity: .7; transition: opacity .2s, background .2s, color .2s; }
+.steps button { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 26px 1fr; gap: 6px; width: 100%; padding: 10px 12px; border-radius: 12px; cursor: pointer; color: var(--muted); transition: background .2s, color .2s; }
 .steps button::before { content: counter(s); font: 600 16px var(--display); }
-.steps button:hover { opacity: 1; }
-.steps button[aria-current="step"] { opacity: 1; color: var(--ink); background: var(--card); box-shadow: var(--ring); }
+.steps button:hover { color: var(--ink); }
+.steps button[aria-current="step"] { color: var(--ink); background: var(--card); box-shadow: var(--ring); }
 .steps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .steps b { color: var(--ink); font-weight: 600; }
 
