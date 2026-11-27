@@ -253,7 +253,7 @@ if (screen && steps && caption) {
 }
 for (const btn of document.querySelectorAll<HTMLButtonElement>('.copy')) {
   btn.addEventListener('click', async () => {
-    const text = btn.previousElementSibling?.textContent?.replace(/^\s*\$\s*/, '') ?? '';
+    const text = btn.previousElementSibling?.textContent?.trim() ?? '';
     try {
       await navigator.clipboard.writeText(text);
       btn.textContent = 'Copied';
