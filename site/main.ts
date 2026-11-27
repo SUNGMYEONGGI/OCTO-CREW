@@ -208,6 +208,63 @@ if (log) {
   if (!reduced) setInterval(line, 1800);
 }
 
+// ---------- install steps ----------
+// Picking a step on the right shows what it looks like on the mock Mac screen,
+// with the cursor on the button to press. It walks through the steps on its own
+// until someone picks one.
+const screen = $('screen');
+const steps = $('steps');
+const caption = $('caption');
+const CAPTIONS = ['Drag OCTO CREW into the Applications folder.', 'On the warning, press “Done”, not “Move to Trash”.',
+  'In Privacy & Security, press “Open Anyway”.', 'Open it again and say hello.'];
+const helloAv = $('hello-av');
+if (helloAv) helloAv.innerHTML = avatar(octo, 34);
+if (screen && steps && caption) {
+  const cursor = screen.querySelector<SVGElement>('.cursor')!;
+  const buttons = [...steps.querySelectorAll<HTMLButtonElement>('button[data-step]')];
+  let current = 1;
+  const show = (n: number) => {
+    current = n;
+    screen.dataset.step = String(n);
+    buttons.forEach((b) => (Number(b.dataset.step) === n ? b.setAttribute('aria-current', 'step') : b.removeAttribute('aria-current')));
+    caption.innerHTML = `<span>${n}</span><em>${CAPTIONS[n - 1]}</em>`;
+    const target = screen.querySelector<HTMLElement>(`.s${n} .target, .s${n} .drag img`);
+    if (target) {
+      const a = screen.getBoundingClientRect(), r = target.getBoundingClientRect();
+      cursor.style.left = `${r.left - a.left + r.width * .6}px`;
+      cursor.style.top = `${r.top - a.top + r.height * .55}px`;
+    }
+  };
+  let timer = 0, picked = false;
+  const stop = () => clearInterval(timer);
+  buttons.forEach((b) => b.addEventListener('click', () => { picked = true; stop(); show(Number(b.dataset.step)); }));
+  // The scenes scale in, so place the cursor once layout settles and again on resize.
+  requestAnimationFrame(() => show(1));
+  for (const ev of ['resize', 'load']) addEventListener(ev, () => show(current));
+  if (!reduced) {
+    new IntersectionObserver(([e]) => {
+      stop();
+      // A click on a step stops the tour for good.
+      if (e.isIntersecting && !picked) timer = setInterval(() => show(current % buttons.length + 1), 3600);
+    }, { threshold: .4 }).observe(screen);
+  }
+  const clock = $('clock');
+  if (clock) clock.textContent = new Date().toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+}
+for (const btn of document.querySelectorAll<HTMLButtonElement>('.copy')) {
+  btn.addEventListener('click', async () => {
+    const text = btn.previousElementSibling?.textContent?.replace(/^\s*\$\s*/, '') ?? '';
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = 'Copied';
+    } catch {
+      btn.textContent = 'Press ⌘C';
+      getSelection()?.selectAllChildren(btn.previousElementSibling!);
+    }
+    setTimeout(() => (btn.textContent = 'Copy'), 1600);
+  });
+}
+
 // ---------- latest release next to the download button ----------
 fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
   .then((r) => (r.ok ? r.json() : null))
