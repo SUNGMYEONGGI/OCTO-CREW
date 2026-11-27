@@ -235,7 +235,7 @@ if (screen && steps && caption) {
       cursor.style.top = `${r.top - a.top + r.height * .55}px`;
     }
   };
-  let timer = 0, picked = false;
+  let timer: ReturnType<typeof setInterval> | undefined, picked = false;
   const stop = () => clearInterval(timer);
   buttons.forEach((b) => b.addEventListener('click', () => { picked = true; stop(); show(Number(b.dataset.step)); }));
   // The scenes scale in, so place the cursor once layout settles and again on resize.
