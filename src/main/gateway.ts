@@ -168,6 +168,15 @@ const SENSITIVE = [
   /Library\/Application Support\/(Google\/Chrome|BraveSoftware|Microsoft Edge|Arc|Firefox|Vivaldi|com\.operasoftware)/, /Library\/Safari\b/, /Library\/Messages\b/, /Library\/Mail\b/,
   /\bsecrets\.bin\b/, /Application Support\/(OCTO CREW|PixelBot|CharacterBot)( Dev)?\/state\.json/,
 ];
+// Files that run something later on their own: shell startup files, login items,
+// SSH keys that let someone in, git hooks. A file tool or a shell command that
+// names one asks first even with 항상 허용 (#104).
+const AUTORUN = [
+  /(^|[\s"'/=~])\.(zshrc|zshenv|zprofile|zlogin|zlogout|bashrc|bash_profile|bash_login|bash_logout|profile|kshrc|inputrc)\b/,
+  /\.config\/fish\b/, /Library\/Launch(Agents|Daemons)\b/, /\/etc\/(paths|profile|zshrc|zshenv|bashrc|sudoers|hosts)\b/,
+  /\bauthorized_keys\b/, /\.git\/hooks\b/, /\bcore\.hooksPath\b/, /\.(vimrc|gitconfig)\b/,
+];
+const FILE_WRITE = /^(Write|Edit|MultiEdit|NotebookEdit)$/;
 // The same places as absolute paths, for sandboxes that deny reads by path
 // (Codex Bots, #105). Keep in step with SENSITIVE.
 function secretPaths(home: string, dataDir: string): string[] {
@@ -201,7 +210,7 @@ function real(p: string): string {
 function sensitive(call: Call, where?: Where): boolean {
   if (call.name.startsWith('mcp__')) return false;
   // What a file tool writes is content, not a target: only its path counts.
-  const args = /^(Write|Edit|MultiEdit|NotebookEdit)$/.test(call.name) ? { path: call.args?.file_path ?? call.args?.notebook_path } : call.args || {};
+  const args = FILE_WRITE.test(call.name) ? { path: call.args?.file_path ?? call.args?.notebook_path } : call.args || {};
   // Shell-escaped spaces (Application\ Support) count as spaces.
   let text = JSON.stringify(args).replace(/\\\//g, '/').replace(/\\\\ /g, ' ');
   if (where) {
@@ -224,7 +233,19 @@ function sensitive(call: Call, where?: Where): boolean {
     // Globs that spell a hidden folder in the home directory (~/.ss?/id_*).
     if (text.includes(`${where.home}/.`) && new RegExp(`${where.home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.[^/\\s"]*[?*[]`).test(text)) return true;
   }
-  return SENSITIVE.some((re) => new RegExp(re.source, 'i').test(text));
+  // Reading a startup file is harmless; writing or running through one isn't.
+  const list = call.name === 'Read' || call.name === 'Grep' || call.name === 'Glob' ? SENSITIVE : [...SENSITIVE, ...AUTORUN];
+  return list.some((re) => new RegExp(re.source, 'i').test(text));
+}
+
+// A file tool writing outside the Bot workspaces (its own and its teammates').
+function writesOutside(call: Call, where?: Where): boolean {
+  if (!where || !FILE_WRITE.test(call.name)) return false;
+  const p = call.args?.file_path ?? call.args?.notebook_path;
+  if (typeof p !== 'string' || !p) return true;
+  const target = real(path.resolve(where.cwd, p.replace(/^~(?=\/|$)/, where.home)));
+  const dir = real(where.workspaces || path.join(where.dataDir, 'workspaces'));
+  return !(target === dir || target.startsWith(dir + path.sep));
 }
 
 function globToRegExp(glob: string): RegExp {
@@ -282,4 +303,4 @@ function maskSecrets(text: unknown, secretValues: string[]): string {
   return out;
 }
 
-export { untrustedShell, accountWrite, accountWriteCommand, tokenArg, isRead, sensitive, secretPaths, decide, finalize, combine, maskSecrets, globToRegExp };
+export { untrustedShell, accountWrite, accountWriteCommand, tokenArg, isRead, sensitive, secretPaths, writesOutside, decide, finalize, combine, maskSecrets, globToRegExp };

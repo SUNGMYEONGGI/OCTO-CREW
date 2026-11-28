@@ -474,7 +474,9 @@ async function review(call: Call, secrets: SecretStore): Promise<{ effect: Effec
     return { ...asked, reason: asked.reason || 'Bot 설정을 바꾸거나 루틴을 만드는 작업은 확인이 필요해요' };
   }
   if (!s.autoReview) return { effect: 'allow' };
-  const base = gateway.decide(call, state.rules, { Bash: s.computerAccess });
+  // A file tool writing outside the Bot workspaces asks unless a rule allows it (#104).
+  const outside = gateway.writesOutside(call, where(call.botId)) ? { [call.name]: 'ask' as const } : {};
+  const base = gateway.decide(call, state.rules, { Bash: s.computerAccess, ...outside });
   if (base.rule || call.name.startsWith(APP_TOOLS) || !s.reviewRules.length) return base;
   const key = JSON.stringify([s.reviewRules, call.name, call.args]);
   try {
