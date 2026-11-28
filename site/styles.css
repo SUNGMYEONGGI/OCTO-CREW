@@ -74,6 +74,7 @@ h1 { font: 700 clamp(40px, 6.2vw, 72px)/1.04 var(--display); letter-spacing: -.0
 .btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 9px; padding: 12px 22px; border-radius: 999px; font: 600 15px var(--text); text-decoration: none; color: var(--ink); border: 1px solid var(--line); background: var(--card); }
 .btn:hover { border-color: var(--muted); }
 .btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn.primary:hover { background: color-mix(in srgb, var(--ink) 84%, var(--paper)); }
 /* Shimmer sweep on the primary button. */
 .btn.primary::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.35) 50%, transparent 70%); transform: translateX(-120%); animation: shimmer 3.2s ease-in-out infinite; }
 @keyframes shimmer { 0%, 55% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
