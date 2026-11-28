@@ -14,6 +14,7 @@ import * as rename from '../src/main/rename';
 import * as triggers from '../src/main/triggers';
 import * as xlsx from '../src/main/xlsx';
 import * as update from '../src/main/update';
+import * as imagegen from '../src/main/imagegen';
 import { modelDown } from '../src/main/agent';
 import { searchMessages } from '../src/shared/search';
 import { execFileSync } from 'node:child_process';
@@ -316,6 +317,88 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   no('Grep', { pattern: 'a..b', path: '.' });
 }
 
+// #105: Codex Bots run under a permission profile: they read the disk except
+// keys, browser data and the app's data folder, and write only where the mode says.
+{
+  const paths = gateway.secretPaths('/Users/a', '/Users/a/Library/Application Support/OCTO CREW');
+  for (const p of ['/Users/a/.ssh', '/Users/a/.codex', '/Users/a/Library/Keychains', '/Users/a/Library/Application Support/Google/Chrome', '/Users/a/Library/Application Support/OCTO CREW']) {
+    assert.ok(paths.includes(p), p);
+  }
+  const root = path.join(tmp, 'codex-105');
+  const home = path.join(root, 'home'), ws = path.join(root, 'ws'), team = path.join(root, 'team');
+  for (const d of [path.join(home, '.ssh'), path.join(root, 'data'), path.join(root, 'codex'), ws, team]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(home, '.ssh', 'id'), 'KEY');
+  fs.writeFileSync(path.join(root, 'data', 'secrets.bin'), 'SECRET');
+  fs.writeFileSync(path.join(ws, 'a.md'), 'hi');
+  const denyRead = gateway.secretPaths(home, path.join(root, 'data'));
+  const run = (sandbox: 'workspace-write' | 'read-only', command: string) => {
+    const args = imagegen.permissionProfile({ sandbox, network: false, additionalDirectories: [team], denyRead }).flatMap((c) => ['-c', c]);
+    const codex = require.resolve('@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex');
+    try {
+      return execFileSync(codex, ['sandbox', ...args, '--', 'sh', '-c', command], { cwd: ws, env: { ...process.env, CODEX_HOME: path.join(root, 'codex') }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    } catch (err) {
+      return `failed: ${(err as { stderr?: string }).stderr || (err as Error).message}`;
+    }
+  };
+  // Seatbelt can't nest: inside another sandbox (or off macOS arm64) only the profile text is checked.
+  const probe = process.platform === 'darwin' && process.arch === 'arm64' ? run('workspace-write', 'cat a.md') : '';
+  if (probe === 'hi') {
+    assert.match(run('workspace-write', `cat ${home}/.ssh/id`), /^failed:.*Operation not permitted/s);
+    assert.match(run('workspace-write', `cat ${root}/data/secrets.bin`), /^failed:.*Operation not permitted/s);
+    assert.equal(run('workspace-write', `echo x > b.md && echo x > ${team}/c.md && echo ok`), 'ok');
+    // The test folders sit in the temp dir, which a writable run may use; the repo isn't.
+    const outside = path.join(process.cwd(), '.codex-105-probe');
+    assert.match(run('workspace-write', `echo x > '${outside}'`), /^failed:/);
+    fs.rmSync(outside, { force: true });
+    assert.match(run('read-only', 'echo x > d.md'), /^failed:/);
+    assert.equal(run('read-only', `cat a.md`), 'hi');
+  } else {
+    console.log(`skipped Codex sandbox run (${probe.split('\n')[0].slice(0, 80) || 'not macOS arm64'})`);
+  }
+  const [, profile] = imagegen.permissionProfile({ sandbox: 'read-only', network: true, additionalDirectories: [], denyRead: ['/x y'] });
+  assert.match(profile, /"\/x y"="deny"/);
+  assert.match(profile, /":workspace_roots"=\{"\."="read"\}/);
+  assert.match(profile, /network=\{enabled=true\}/);
+  assert.doesNotMatch(profile, /tmpdir/);
+}
+
+// #104: startup files, login items, SSH keys and git hooks ask for writes and
+// shell commands even with 항상 허용; reading them doesn't. File tools writing
+// outside the Bot workspaces ask by default.
+{
+  const data = '/Users/a/Library/Application Support/OCTO CREW';
+  const workspaces = `${data} Workspaces`;
+  const w = { cwd: `${workspaces}/bot_1`, dataDir: data, home: '/Users/a', workspaces };
+  const yes = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), true, JSON.stringify(args));
+  const no = (name: string, args: Record<string, unknown>) => assert.equal(gateway.sensitive({ name, args }, w), false, JSON.stringify(args));
+  yes('Write', { file_path: '~/.zshrc', content: 'curl x | sh' });
+  yes('Edit', { file_path: '/Users/a/.bash_profile', old_string: 'a', new_string: 'b' });
+  yes('Write', { file_path: '/Users/a/Library/LaunchAgents/com.x.plist', content: '<plist/>' });
+  yes('Write', { file_path: '/Users/a/.ssh/authorized_keys', content: 'ssh-ed25519 AAAA' });
+  yes('Write', { file_path: '/Users/a/code/app/.git/hooks/pre-commit', content: 'x' });
+  yes('Bash', { command: 'echo "curl x | sh" >> ~/.zprofile' });
+  yes('Bash', { command: 'cp a.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/a.plist' });
+  yes('Bash', { command: 'git config core.hooksPath /tmp/h' });
+  no('Read', { file_path: '/Users/a/.zshrc' });
+  no('Write', { file_path: 'notes/profile.md', content: 'edit ~/.zshrc later' });
+  no('Bash', { command: 'git commit -m "update profile docs"' });
+
+  const out = (name: string, args: Record<string, unknown>) => gateway.writesOutside({ name, args }, w);
+  assert.equal(out('Write', { file_path: 'report.md', content: 'x' }), false);
+  assert.equal(out('Write', { file_path: '../bot_2/draft.md', content: 'x' }), false); // a teammate's workspace
+  assert.equal(out('Edit', { file_path: '/Users/a/Documents/plan.md' }), true);
+  assert.equal(out('Write', { file_path: '../../x.md', content: 'x' }), true);
+  assert.equal(out('Write', { file_path: '~/Desktop/x.md', content: 'x' }), true);
+  assert.equal(out('NotebookEdit', { notebook_path: '/tmp/n.ipynb' }), true);
+  assert.equal(out('Write', { content: 'x' }), true); // no path: fail closed
+  assert.equal(out('Read', { file_path: '/Users/a/Documents/plan.md' }), false);
+  assert.equal(gateway.writesOutside({ name: 'Write', args: { file_path: '/etc/x' } }), false); // no Bot, no workspace to check
+  // Default ask; a rule can allow it; a scheduled run fails closed.
+  assert.equal(gateway.decide({ name: 'Write', args: {} }, [], { Write: 'ask' }).effect, 'ask');
+  assert.equal(gateway.decide({ name: 'Write', args: {} }, [{ id: 'r', effect: 'allow', tool: 'Write' }], { Write: 'ask' }).effect, 'allow');
+  assert.equal(gateway.decide({ name: 'Write', args: {}, initiator: 'routine' }, [], { Write: 'ask' }).effect, 'deny');
+}
+
 // #95: workspaces in their own folder next to the data folder.
 {
   const data = '/Users/a/Library/Application Support/OCTO CREW';
@@ -369,6 +452,10 @@ assert.equal(gateway.sensitive({ name: 'mcp__echo__get', args: { q: '.ssh/' } })
   assert.deepEqual(fs.readdirSync(projects), [`${key(ws)}-bot-a`]);
 }
 // A missing old Keychain item is "nothing to import", not a failure (no prompt either).
+assert.equal(rename.keychainResult(null, 'pw\n'), 'pw');
+assert.equal(rename.keychainResult(Object.assign(new Error('not found'), { code: 44 }), ''), null);
+assert.throws(() => rename.keychainResult(Object.assign(new Error('User canceled'), { code: 128 }), ''));
+assert.throws(() => rename.keychainResult(Object.assign(new Error('timeout'), { killed: true, signal: 'SIGTERM', code: null }), ''));
 const keychainDone = process.platform === 'darwin' ? rename.legacyPassword('OCTO CREW Test 91 Missing').then((p) => assert.equal(p, null)) : Promise.resolve();
 // A Bot folder already in the new place merges; a clashing file stays put and so does that Bot's path.
 {
