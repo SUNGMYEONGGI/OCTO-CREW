@@ -71,12 +71,12 @@ main > section { position: relative; padding: 96px var(--gut); }
 h1 { font: 700 clamp(40px, 6.2vw, 72px)/1.04 var(--display); letter-spacing: -.03em; margin: 26px 0 0; max-width: 15ch; text-wrap: balance; }
 .lede { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 56ch; margin: 24px 0 32px; }
 .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
-.btn { display: inline-flex; align-items: center; gap: 9px; padding: 12px 22px; border-radius: 999px; font: 600 15px var(--text); text-decoration: none; color: var(--ink); border: 0; background: var(--card);
-  box-shadow: 0 2px 6px -1px rgba(22, 22, 24, .2), var(--ring); transition: transform .15s, box-shadow .15s; }
-.btn:hover { transform: translateY(-1px); }
-/* Glossy blue, lit from inside. */
-.btn.primary { color: #fff; background: linear-gradient(180deg, #2a5cff, #0d44e8); box-shadow: 0 2px 6px -1px rgba(4, 24, 85, .28), inset 0 6px 14px rgba(66, 174, 247, .48), 0 0 0 1px #0b3bd0; }
-.btn.primary:hover { box-shadow: 0 6px 18px -4px rgba(13, 68, 232, .45), inset 0 6px 14px rgba(66, 174, 247, .48), 0 0 0 1px #0b3bd0; }
+.btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 9px; padding: 12px 22px; border-radius: 999px; font: 600 15px var(--text); text-decoration: none; color: var(--ink); border: 1px solid var(--line); background: var(--card); }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+/* Shimmer sweep on the primary button. */
+.btn.primary::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.35) 50%, transparent 70%); transform: translateX(-120%); animation: shimmer 3.2s ease-in-out infinite; }
+@keyframes shimmer { 0%, 55% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
 .release { font-size: 13px; color: var(--muted); margin: 16px 0 0; }
 .cast { display: flex; justify-content: center; flex-wrap: wrap; gap: 14px 22px; margin-top: 52px; }
 .cast figure { margin: 0; display: grid; justify-items: center; gap: 6px; }
